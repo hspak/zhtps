@@ -9,8 +9,9 @@ const log = std.log.scoped(.server);
 pub const InitError = worker.RunError;
 pub const RunError = InitError || std.Thread.SpawnError || error{AlreadyServed};
 
-/// App.Exchange implements the synchronous hooks illustrated by application.Exchange.
-/// Hooks must be bounded and nonblocking; different workers may call them concurrently.
+/// App.Exchange implements the low-level hooks illustrated by application.Exchange.
+/// Direct hooks must be bounded and nonblocking; generated endpoint applications
+/// instead use their bounded executors. Different workers may call concurrently.
 /// The server owns connection storage, but no application-global resources.
 pub fn Server(comptime App: type) type {
     return struct {
@@ -29,6 +30,30 @@ pub fn Server(comptime App: type) type {
         /// On success the value may move, but must not be copied or mutated directly.
         /// Call deinit even if serve is never called.
         pub fn init(self: *Self, gpa: std.mem.Allocator, io: std.Io, config: Config) InitError!void {
+            if (Worker.RuntimeInit != void)
+                @compileError("this application requires initApplication with its runtime value");
+            return self.initInner(gpa, io, config, {});
+        }
+
+        /// Initializes a server whose application needs a runtime value such as
+        /// a pointer to caller-owned services. The value is borrowed through deinit.
+        pub fn initApplication(
+            self: *Self,
+            gpa: std.mem.Allocator,
+            io: std.Io,
+            config: Config,
+            application: Worker.RuntimeInit,
+        ) InitError!void {
+            return self.initInner(gpa, io, config, application);
+        }
+
+        fn initInner(
+            self: *Self,
+            gpa: std.mem.Allocator,
+            io: std.Io,
+            config: Config,
+            application: Worker.RuntimeInit,
+        ) InitError!void {
             self.* = undefined;
             var resolved = try config.resolve();
             const shared = try gpa.create(Worker.Shared);
@@ -41,7 +66,15 @@ pub fn Server(comptime App: type) type {
             var initialized: usize = 0;
             errdefer for (0..initialized) |offset| workers[initialized - 1 - offset].deinit();
             for (workers, 0..) |*item, id| {
-                try item.init(gpa, io, resolved, &shared.abort, @intCast(id), shared);
+                try item.initApplication(
+                    gpa,
+                    io,
+                    resolved,
+                    &shared.abort,
+                    @intCast(id),
+                    shared,
+                    application,
+                );
                 initialized += 1;
                 if (id == 0) {
                     resolved.port = item.listener.port;

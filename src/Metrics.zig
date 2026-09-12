@@ -24,6 +24,8 @@ pub const Counter = enum {
     request_timeouts_total,
     header_timeouts_total,
     body_timeouts_total,
+    application_timeouts_total,
+    application_queue_rejections_total,
     write_timeouts_total,
     peer_disconnects_total,
     bytes_received_total,

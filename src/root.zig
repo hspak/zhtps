@@ -9,6 +9,16 @@ pub const metrics_format = @import("metrics_format.zig");
 pub const Logger = @import("Logger.zig");
 pub const Admission = @import("Admission.zig");
 pub const application = @import("application.zig");
+const endpoints = @import("endpoint.zig");
+pub const Application = endpoints.Application;
+pub const Body = endpoints.Body;
+pub const Call = endpoints.Call;
+pub const EndpointError = endpoints.EndpointError;
+pub const Method = endpoints.Method;
+pub const Status = endpoints.Status;
+pub const endpoint = endpoints.endpoint;
+pub const get = endpoints.get;
+pub const group = endpoints.group;
 pub const Server = server.Server;
 /// Server with the bundled root, echo, and stream resources; no router setup required.
 pub const DefaultServer = Server(application);
@@ -24,6 +34,7 @@ test {
     _ = Logger;
     _ = Admission;
     _ = application;
+    _ = endpoints;
     _ = platform;
     _ = server;
 }

@@ -25,6 +25,21 @@ pub const Level = enum {
     warn,
     @"error",
 };
+
+pub const Attribute = struct {
+    name: []const u8,
+    value: Value,
+
+    pub const Value = union(enum) {
+        string: []const u8,
+        signed: i64,
+        unsigned: u64,
+        float: f64,
+        boolean: bool,
+        null,
+    };
+};
+
 pub const Event = struct {
     timestamp_ns: u64,
     level: Level = .info,
@@ -42,6 +57,8 @@ pub const Event = struct {
     address: ?[]const u8 = null,
     port: ?u16 = null,
     result: ?i32 = null,
+    route: ?[]const u8 = null,
+    fields: []const Attribute = &.{},
 };
 
 /// Borrows queue storage and metrics until the logger is discarded. The owning
@@ -78,23 +95,68 @@ pub fn emit(logger: *Logger, event: Event) void {
 }
 
 fn writeRecord(record: Event, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    if (record.level != .info or !std.mem.eql(u8, record.event, "request_complete") or
-        record.connection == null or record.request == null or record.status == null or
-        record.method == null or record.duration_ns == null or record.bytes == null or
-        record.reason != null or record.operation != null or record.phase != null or
-        record.address != null or record.port != null or record.result != null)
-        return std.json.Stringify.value(record, .{ .emit_null_optional_fields = false }, writer);
-    try writer.print("{{\"timestamp_ns\":{d},\"level\":\"info\",\"event\":\"request_complete\"," ++
-        "\"worker\":{d},\"connection\":{d},\"request\":{d}," ++
-        "\"status\":{d},\"method\":", .{
-        record.timestamp_ns,
-        record.worker,
-        record.connection.?,
-        record.request.?,
-        record.status.?,
-    });
-    try std.json.Stringify.value(record.method.?, .{}, writer);
-    try writer.print(",\"duration_ns\":{d},\"bytes\":{d}}}", .{ record.duration_ns.?, record.bytes.? });
+    try writer.print("{{\"timestamp_ns\":{d},\"level\":", .{record.timestamp_ns});
+    try writeJsonString(@tagName(record.level), writer);
+    try writer.writeAll(",\"event\":");
+    try writeJsonString(record.event, writer);
+    try writer.print(",\"worker\":{d}", .{record.worker});
+    if (record.connection) |value| try writer.print(",\"connection\":{d}", .{value});
+    if (record.request) |value| try writer.print(",\"request\":{d}", .{value});
+    if (record.status) |value| try writer.print(",\"status\":{d}", .{value});
+    if (record.reason) |value| {
+        try writer.writeAll(",\"reason\":");
+        try writeJsonString(value, writer);
+    }
+    if (record.method) |value| {
+        try writer.writeAll(",\"method\":");
+        try writeJsonString(value, writer);
+    }
+    if (record.duration_ns) |value| try writer.print(",\"duration_ns\":{d}", .{value});
+    if (record.bytes) |value| try writer.print(",\"bytes\":{d}", .{value});
+    if (record.operation) |value| {
+        try writer.writeAll(",\"operation\":");
+        try writeJsonString(value, writer);
+    }
+    if (record.phase) |value| {
+        try writer.writeAll(",\"phase\":");
+        try writeJsonString(value, writer);
+    }
+    if (record.address) |value| {
+        try writer.writeAll(",\"address\":");
+        try writeJsonString(value, writer);
+    }
+    if (record.port) |value| try writer.print(",\"port\":{d}", .{value});
+    if (record.result) |value| try writer.print(",\"result\":{d}", .{value});
+    if (record.route) |value| {
+        try writer.writeAll(",\"route\":");
+        try writeJsonString(value, writer);
+    }
+    if (record.fields.len > 0) {
+        try writer.writeAll(",\"fields\":{");
+        for (record.fields, 0..) |field, index| {
+            if (index != 0) try writer.writeByte(',');
+            try writeJsonString(field.name, writer);
+            try writer.writeByte(':');
+            try writeAttribute(field.value, writer);
+        }
+        try writer.writeByte('}');
+    }
+    try writer.writeByte('}');
+}
+
+fn writeJsonString(value: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    try std.json.Stringify.value(value, .{}, writer);
+}
+
+fn writeAttribute(value: Attribute.Value, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    switch (value) {
+        .string => |item| try writeJsonString(item, writer),
+        .signed => |item| try writer.print("{d}", .{item}),
+        .unsigned => |item| try writer.print("{d}", .{item}),
+        .float => |item| try writer.print("{d}", .{item}),
+        .boolean => |item| try writer.writeAll(if (item) "true" else "false"),
+        .null => try writer.writeAll("null"),
+    }
 }
 
 pub fn peek(logger: *Logger) ?*Slot {
@@ -223,4 +285,32 @@ test "access records preserve escaping, extra fields and overflow accounting" {
     try testing.expect(logger.peek() == null);
     try testing.expectEqual(@as(u64, 1), metrics.get(.log_dropped_total));
     try testing.expectEqual(@as(u64, 2), metrics.get(.log_events_total));
+}
+
+test "logger appends route and structured fields" {
+    const testing = std.testing;
+    var slots: [1]Slot = undefined;
+    var metrics: Metrics = .{};
+    var logger: Logger = undefined;
+    logger.init(&slots, &metrics, false);
+    logger.emit(.{
+        .timestamp_ns = 1,
+        .event = "custom",
+        .route = "create_widget",
+        .fields = &.{
+            .{ .name = "account_id", .value = .{ .unsigned = 12 } },
+            .{ .name = "cached", .value = .{ .boolean = true } },
+        },
+    });
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        testing.allocator,
+        logger.peek().?.bytes[0..logger.peek().?.len],
+        .{},
+    );
+    defer parsed.deinit();
+    try testing.expectEqualStrings("create_widget", parsed.value.object.get("route").?.string);
+    const fields = parsed.value.object.get("fields").?.object;
+    try testing.expectEqual(@as(i64, 12), fields.get("account_id").?.integer);
+    try testing.expect(fields.get("cached").?.bool);
 }

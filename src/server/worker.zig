@@ -1,4 +1,4 @@
-//! Private completion-driven workers. Application hooks run on the owning worker.
+//! Private completion-driven workers with optional bounded application executors.
 
 const std = @import("std");
 const platform = @import("../platform.zig");
@@ -12,7 +12,7 @@ const Admission = @import("../Admission.zig");
 const application = @import("../application.zig");
 const log = std.log.scoped(.server_worker);
 
-pub const RunError = std.mem.Allocator.Error || platform.Error || Config.Error || error{
+pub const RunError = std.mem.Allocator.Error || std.Thread.SpawnError || platform.Error || Config.Error || error{
     IoUringUnavailable,
     IoUringOperationUnsupported,
     IoUringResources,
@@ -47,13 +47,28 @@ fn cancelSync(ring: *linux.IoUring, user_data: u64) error{IoUringOperationUnsupp
     }
 }
 
+fn createApplicationEvent() error{IoUringResources}!linux.fd_t {
+    const result = linux.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK);
+    return switch (linux.errno(result)) {
+        .SUCCESS => @intCast(result),
+        else => error.IoUringResources,
+    };
+}
+
 /// App.Exchange implements init, receiveHead, receiveBody, respond, produce,
-/// and allowedMethods, as illustrated by application.Exchange. Hooks must be
-/// bounded and nonblocking. Their buffers remain owned by the connection until
-/// its response finishes. The server owns no application-global resources.
+/// and allowedMethods, as illustrated by application.Exchange. Direct hooks
+/// must be bounded and nonblocking; generated endpoint applications mark their
+/// user hooks for isolated execution. Buffers remain owned by the connection
+/// until its response finishes. The server owns no application-global resources.
 pub fn Worker(comptime App: type) type {
     return struct {
         const Self = @This();
+
+        pub const RuntimeInit = if (@hasDecl(App, "RuntimeInit")) App.RuntimeInit else void;
+        const has_application_metrics = @hasDecl(App, "CustomMetrics");
+        const ApplicationMetrics = if (has_application_metrics) App.CustomMetrics else void;
+        const isolated_application = if (@hasDecl(App, "isolated")) App.isolated else false;
+        const ApplicationLane = if (isolated_application) App.Lane else enum { direct };
 
         config: Config,
         io: std.Io,
@@ -71,9 +86,12 @@ pub fn Worker(comptime App: type) type {
         storage: []u8,
         log_slots: []Logger.Slot,
         metrics: Metrics = .{},
+        application_metrics: ApplicationMetrics = if (has_application_metrics) .{} else {},
         logger: Logger = undefined,
         admission: Admission = undefined,
         stop: *const std.atomic.Value(bool),
+        application_runtime: RuntimeInit = if (RuntimeInit == void) {} else undefined,
+        executor: if (isolated_application) ApplicationExecutor else void = if (isolated_application) undefined else {},
         pending: usize = 0,
         accepting: bool = false,
         admin_accepting: bool = false,
@@ -81,6 +99,9 @@ pub fn Worker(comptime App: type) type {
         admin_retry_ns: u64 = 0,
         ticking: bool = false,
         logging: bool = false,
+        application_event_pending: bool = false,
+        application_event_fd: linux.fd_t = -1,
+        application_event_value: u64 = 0,
         // Descriptors and queued record bytes stay stable until the log CQE.
         log_iovecs: [16]std.posix.iovec_const = undefined,
         log_batch_remaining: usize = 0,
@@ -143,6 +164,7 @@ pub fn Worker(comptime App: type) type {
             accept_admin,
             tick,
             log_write,
+            application,
             receive,
             send,
             cancel_receive,
@@ -151,6 +173,7 @@ pub fn Worker(comptime App: type) type {
             cancel_admin,
             cancel_tick,
             cancel_log,
+            cancel_application,
         };
 
         const Connection = struct {
@@ -199,8 +222,210 @@ pub fn Worker(comptime App: type) type {
             response_status: u16 = 0,
             drained_bytes: usize = 0,
             permit: ?Admission.Decision = null,
+            application_timed_out: bool = false,
 
-            const Phase = enum { reading, inspecting, writing, drain, canceling };
+            const Phase = enum { reading, application, inspecting, writing, drain, canceling };
+        };
+
+        const ApplicationExecutor = struct {
+            owner: *Self,
+            gpa: std.mem.Allocator,
+            io: std.Io,
+            lanes: [std.meta.fields(ApplicationLane).len]LaneQueue,
+            task_storage: []Task,
+            completions: []Completion,
+            completion_mutex: std.Io.Mutex = .init,
+            completion_read: usize = 0,
+            completion_count: usize = 0,
+            threads: []std.Thread,
+            started: usize = 0,
+
+            const Stage = enum {
+                head,
+                response,
+            };
+
+            const Task = struct {
+                index: usize,
+                generation: u32,
+                stage: Stage,
+                deadline_ns: u64,
+            };
+
+            const Completion = struct {
+                task: Task,
+                response: ?http.Response,
+                expired: bool,
+            };
+
+            const LaneQueue = struct {
+                tasks: []Task,
+                read_index: usize = 0,
+                count: usize = 0,
+                stopping: bool = false,
+                mutex: std.Io.Mutex = .init,
+                ready: std.Io.Condition = .init,
+            };
+
+            fn init(
+                gpa: std.mem.Allocator,
+                io: std.Io,
+                owner: *Self,
+                completion_capacity: usize,
+            ) RunError!ApplicationExecutor {
+                var task_count: usize = 0;
+                var thread_count: usize = 0;
+                inline for (std.meta.tags(ApplicationLane)) |lane| {
+                    const options = App.laneOptions(lane);
+                    if (options.threads == 0 or options.queue == 0 or options.timeout_ms == 0)
+                        return error.InvalidLimit;
+                    task_count = std.math.add(usize, task_count, options.queue) catch
+                        return error.InvalidLimit;
+                    thread_count = std.math.add(usize, thread_count, options.threads) catch
+                        return error.InvalidLimit;
+                }
+                const task_storage = try gpa.alloc(Task, task_count);
+                errdefer gpa.free(task_storage);
+                const completions = try gpa.alloc(Completion, completion_capacity);
+                errdefer gpa.free(completions);
+                const threads = try gpa.alloc(std.Thread, thread_count);
+                errdefer gpa.free(threads);
+                var result: ApplicationExecutor = .{
+                    .owner = owner,
+                    .gpa = gpa,
+                    .io = io,
+                    .lanes = undefined,
+                    .task_storage = task_storage,
+                    .completions = completions,
+                    .threads = threads,
+                };
+                var task_offset: usize = 0;
+                inline for (std.meta.tags(ApplicationLane)) |lane| {
+                    const count = App.laneOptions(lane).queue;
+                    result.lanes[@intFromEnum(lane)] = .{
+                        .tasks = task_storage[task_offset..][0..count],
+                    };
+                    task_offset += count;
+                }
+                return result;
+            }
+
+            fn deinit(executor: *ApplicationExecutor) void {
+                std.debug.assert(executor.started == 0);
+                executor.gpa.free(executor.threads);
+                executor.gpa.free(executor.completions);
+                executor.gpa.free(executor.task_storage);
+                executor.* = undefined;
+            }
+
+            fn start(executor: *ApplicationExecutor) std.Thread.SpawnError!void {
+                errdefer executor.stop();
+                inline for (std.meta.tags(ApplicationLane)) |lane| {
+                    const count = App.laneOptions(lane).threads;
+                    for (0..count) |_| {
+                        executor.threads[executor.started] = try std.Thread.spawn(
+                            .{},
+                            ApplicationExecutor.threadMain,
+                            .{ executor, lane },
+                        );
+                        executor.started += 1;
+                    }
+                }
+            }
+
+            fn stop(executor: *ApplicationExecutor) void {
+                for (&executor.lanes) |*lane| {
+                    lane.mutex.lockUncancelable(executor.io);
+                    lane.stopping = true;
+                    lane.ready.broadcast(executor.io);
+                    lane.mutex.unlock(executor.io);
+                }
+                for (executor.threads[0..executor.started]) |thread| thread.join();
+                executor.started = 0;
+            }
+
+            fn submit(executor: *ApplicationExecutor, lane_id: ApplicationLane, task: Task) bool {
+                const lane = &executor.lanes[@intFromEnum(lane_id)];
+                lane.mutex.lockUncancelable(executor.io);
+                defer lane.mutex.unlock(executor.io);
+                if (lane.stopping or lane.count == lane.tasks.len) return false;
+                lane.tasks[(lane.read_index + lane.count) % lane.tasks.len] = task;
+                lane.count += 1;
+                lane.ready.signal(executor.io);
+                return true;
+            }
+
+            fn takeCompletion(executor: *ApplicationExecutor) ?Completion {
+                executor.completion_mutex.lockUncancelable(executor.io);
+                defer executor.completion_mutex.unlock(executor.io);
+                if (executor.completion_count == 0) return null;
+                const completion = executor.completions[executor.completion_read];
+                executor.completion_read = (executor.completion_read + 1) % executor.completions.len;
+                executor.completion_count -= 1;
+                return completion;
+            }
+
+            fn threadMain(executor: *ApplicationExecutor, lane_id: ApplicationLane) void {
+                while (executor.takeTask(lane_id)) |task| {
+                    const started_ns = platform.monotonicNs();
+                    const response: ?http.Response = if (started_ns >= task.deadline_ns)
+                        null
+                    else response: {
+                        const connection = &executor.owner.connections[task.index];
+                        break :response switch (task.stage) {
+                            .head => connection.exchange.runHead(&connection.parser.request),
+                            .response => connection.exchange.respond(&connection.parser.request),
+                        };
+                    };
+                    const expired = started_ns >= task.deadline_ns or
+                        platform.monotonicNs() >= task.deadline_ns;
+                    executor.completion_mutex.lockUncancelable(executor.io);
+                    std.debug.assert(executor.completion_count < executor.completions.len);
+                    const write_index = (executor.completion_read + executor.completion_count) %
+                        executor.completions.len;
+                    executor.completions[write_index] = .{
+                        .task = task,
+                        .response = response,
+                        .expired = expired,
+                    };
+                    executor.completion_count += 1;
+                    executor.completion_mutex.unlock(executor.io);
+                    executor.notify();
+                }
+            }
+
+            fn notify(executor: *ApplicationExecutor) void {
+                const one: u64 = 1;
+                while (true) {
+                    const result = linux.write(
+                        executor.owner.application_event_fd,
+                        @ptrCast(&one),
+                        @sizeOf(u64),
+                    );
+                    switch (linux.errno(result)) {
+                        .SUCCESS, .AGAIN => return,
+                        .INTR => continue,
+                        else => {
+                            executor.owner.shared.?.abort.store(true, .monotonic);
+                            return;
+                        },
+                    }
+                }
+            }
+
+            fn takeTask(executor: *ApplicationExecutor, lane_id: ApplicationLane) ?Task {
+                const lane = &executor.lanes[@intFromEnum(lane_id)];
+                lane.mutex.lockUncancelable(executor.io);
+                defer lane.mutex.unlock(executor.io);
+                while (lane.count == 0 and !lane.stopping) {
+                    lane.ready.waitUncancelable(executor.io, &lane.mutex);
+                }
+                if (lane.count == 0) return null;
+                const task = lane.tasks[lane.read_index];
+                lane.read_index = (lane.read_index + 1) % lane.tasks.len;
+                lane.count -= 1;
+                return task;
+            }
         };
 
         fn token(kind: Kind, index: usize, generation: u32) u64 {
@@ -214,6 +439,14 @@ pub fn Worker(comptime App: type) type {
         /// Runs on the owning thread after every worker has initialized. Records
         /// errors in failure and signals shared abort before draining pending I/O.
         pub fn workerMain(self: *Self) void {
+            if (isolated_application) {
+                self.executor.start() catch |err| {
+                    self.failure = err;
+                    self.shared.?.abort.store(true, .monotonic);
+                    return;
+                };
+            }
+            defer if (isolated_application) self.executor.stop();
             self.thread_id.store(std.Thread.getCurrentId(), .monotonic);
             const shared = self.shared.?;
             _ = shared.ready.fetchAdd(1, .release);
@@ -233,6 +466,21 @@ pub fn Worker(comptime App: type) type {
         /// io, stop, and shared until deinit; self must stay at a stable address.
         /// Releases acquired resources on error without invoking application hooks.
         pub fn init(self: *Self, gpa: std.mem.Allocator, io: std.Io, config: Config, stop: *const std.atomic.Value(bool), worker_id: u32, shared: *Shared) RunError!void {
+            if (RuntimeInit != void)
+                @compileError("this application requires initApplication with its runtime value");
+            return self.initApplication(gpa, io, config, stop, worker_id, shared, {});
+        }
+
+        pub fn initApplication(
+            self: *Self,
+            gpa: std.mem.Allocator,
+            io: std.Io,
+            config: Config,
+            stop: *const std.atomic.Value(bool),
+            worker_id: u32,
+            shared: *Shared,
+            application_runtime: RuntimeInit,
+        ) RunError!void {
             const admission_options = try config.resolveAdmission();
             const count = config.max_connections + if (worker_id == 0) config.admin_connections else 0;
             var transferred = false;
@@ -251,6 +499,11 @@ pub fn Worker(comptime App: type) type {
             // Probe before submitting anything: error cleanup depends on this
             // Linux 6.0 capability even when the SQ/CQ processing path fails.
             try cancelSync(&ring, 0);
+            const application_event_fd = if (isolated_application)
+                try createApplicationEvent()
+            else
+                -1;
+            errdefer if (!transferred and application_event_fd >= 0) platform.close(application_event_fd);
             const listener = try platform.listen(config.address, config.port, .{ .reuse_port = true });
             errdefer if (!transferred) platform.close(listener.fd);
             const admin_listener = if (worker_id == 0 and config.admin_connections > 0)
@@ -270,6 +523,10 @@ pub fn Worker(comptime App: type) type {
             errdefer if (!transferred) gpa.free(storage);
             const log_slots = try gpa.alloc(Logger.Slot, if (config.log_fd != null) config.log_slots else 0);
             errdefer if (!transferred) gpa.free(log_slots);
+            var executor = if (isolated_application)
+                try ApplicationExecutor.init(gpa, io, self, config.max_connections)
+            else {};
+            errdefer if (!transferred and isolated_application) executor.deinit();
             self.* = .{
                 .config = config,
                 .io = io,
@@ -286,6 +543,9 @@ pub fn Worker(comptime App: type) type {
                 .storage = storage,
                 .log_slots = log_slots,
                 .stop = stop,
+                .application_runtime = application_runtime,
+                .executor = executor,
+                .application_event_fd = application_event_fd,
             };
             // From here, self owns every resource; its ring is destroyed before
             // freeing any buffer that might still be referenced by the kernel.
@@ -325,10 +585,12 @@ pub fn Worker(comptime App: type) type {
         /// owning event-loop thread must have returned before this call.
         pub fn deinit(self: *Self) void {
             std.debug.assert(self.pending == 0);
+            if (isolated_application) self.executor.deinit();
             self.ring.deinit();
             for (self.connections) |connection| if (connection.fd >= 0) platform.close(connection.fd);
             platform.close(self.listener.fd);
             if (self.admin_listener.fd >= 0) platform.close(self.admin_listener.fd);
+            if (self.application_event_fd >= 0) platform.close(self.application_event_fd);
             self.gpa.free(self.log_slots);
             self.gpa.free(self.storage);
             self.gpa.free(self.active_slots);
@@ -346,6 +608,19 @@ pub fn Worker(comptime App: type) type {
         fn queued(self: *Self) void {
             self.pending += 1;
             self.metrics.recorder().add(.io_submissions_total, 1);
+        }
+
+        fn queueApplicationEvent(self: *Self) RunError!void {
+            if (!isolated_application) comptime unreachable;
+            try self.ensureSubmission();
+            _ = self.ring.read(
+                control(.application),
+                self.application_event_fd,
+                .{ .buffer = std.mem.asBytes(&self.application_event_value) },
+                0,
+            ) catch return error.IoUringResources;
+            self.application_event_pending = true;
+            self.queued();
         }
 
         fn loop(self: *Self) RunError!void {
@@ -369,6 +644,8 @@ pub fn Worker(comptime App: type) type {
                         self.ticking = true;
                         self.queued();
                     }
+                    if (isolated_application and !self.application_event_pending)
+                        try self.queueApplicationEvent();
                     try self.queueLog();
                 }
                 self.metrics.set(.io_pending, self.pending);
@@ -394,7 +671,8 @@ pub fn Worker(comptime App: type) type {
                     };
                 }
                 if (self.draining and !self.stopping and (self.active_connections == 0 or
-                    platform.monotonicNs() >= self.shutdown_deadline)) try self.stopOperations();
+                    (platform.monotonicNs() >= self.shutdown_deadline and !self.hasApplicationWork())))
+                    try self.stopOperations();
             }
         }
 
@@ -435,10 +713,12 @@ pub fn Worker(comptime App: type) type {
                 .accept_admin,
                 .tick,
                 .log_write,
+                .application,
                 .cancel_accept,
                 .cancel_admin,
                 .cancel_tick,
                 .cancel_log,
+                .cancel_application,
             };
             for (controls) |kind| cancelSync(&self.ring, control(kind)) catch
                 @panic("previously available synchronous cancellation failed");
@@ -595,6 +875,13 @@ pub fn Worker(comptime App: type) type {
                     self.ticking = false;
                     if (!self.stopping) try self.tick();
                 },
+                .application => {
+                    self.application_event_pending = false;
+                    if (completion.res < 0 and
+                        completion.res != -@as(i32, @intFromEnum(linux.E.CANCELED)))
+                        return error.IoUringResources;
+                    if (!self.stopping) try self.finishApplications();
+                },
                 .log_write => {
                     self.logging = false;
                     if (completion.res <= 0) {
@@ -607,7 +894,7 @@ pub fn Worker(comptime App: type) type {
                         if (self.log_batch_remaining == 0) self.releaseLog();
                     }
                 },
-                .cancel_accept, .cancel_admin, .cancel_tick, .cancel_log => {},
+                .cancel_accept, .cancel_admin, .cancel_tick, .cancel_log, .cancel_application => {},
                 .receive, .send, .cancel_receive, .cancel_send => {
                     const index: usize = @intCast((completion.user_data >> 8) & 0xffffff);
                     const generation: u32 = @truncate(completion.user_data >> 32);
@@ -638,7 +925,9 @@ pub fn Worker(comptime App: type) type {
                 .max_body_bytes = self.config.max_body_bytes,
                 .max_chunk_framing_bytes = self.config.max_chunk_framing_bytes,
             });
-            connection.exchange.init(connection.application_buffer);
+            if (@hasDecl(App.Exchange, "initApplication")) {
+                connection.exchange.initApplication(connection.application_buffer, self.application_runtime);
+            } else connection.exchange.init(connection.application_buffer);
             connection.request_started = false;
             connection.request_completed = false;
             connection.first_byte_recorded = false;
@@ -651,6 +940,7 @@ pub fn Worker(comptime App: type) type {
             connection.stream_fragment = null;
             connection.close_after_response = false;
             connection.interim = false;
+            connection.application_timed_out = false;
             connection.deadline = now + @as(u64, self.config.idle_timeout_ms) * 1_000_000;
         }
 
@@ -801,27 +1091,36 @@ pub fn Worker(comptime App: type) type {
                                     return;
                                 },
                             }
-                            if (connection.exchange.receiveHead(request)) |response| {
+                            if (@hasDecl(App.Exchange, "setRequestRuntime")) {
+                                connection.exchange.setRequestRuntime(
+                                    &self.application_metrics,
+                                    self.io,
+                                    token(.receive, index, connection.generation) & ~@as(u64, 255),
+                                    connection.request_id,
+                                );
+                            }
+                            const early_response = if (isolated_application)
+                                connection.exchange.prepareHead(request)
+                            else
+                                connection.exchange.receiveHead(request);
+                            if (!isolated_application and @hasDecl(App.Exchange, "flushLogs"))
+                                connection.exchange.flushLogs(&self.logger);
+                            if (early_response) |response| {
                                 var early = response;
                                 early.close = early.close or request.chunked or (request.content_length orelse 0) > 0;
                                 try self.startResponse(index, early);
                                 return;
                             }
+                            if (isolated_application) {
+                                if (!self.submitApplication(index, .head)) {
+                                    try self.respondStatus(index, 503, request.chunked or
+                                        (request.content_length orelse 0) > 0);
+                                }
+                                return;
+                            }
                         } else if (try self.receiveAdminHead(index)) return;
-                        self.event(index, .debug, "request_head", null);
-                        if (request.expect_continue and (request.chunked or (request.content_length orelse 0) > 0)) {
-                            const interim = "HTTP/1.1 100 Continue\r\n\r\n";
-                            @memcpy(connection.output_buffer[0..interim.len], interim);
-                            connection.output_len = interim.len;
-                            connection.output_sent = 0;
-                            connection.interim = true;
-                            connection.phase = .writing;
-                            connection.deadline = @min(connection.deadline, platform.monotonicNs() +
-                                @as(u64, self.config.write_timeout_ms) * 1_000_000);
-                            self.metrics.recorder().response(100);
-                            try self.queueSend(index);
-                            return;
-                        }
+                        try self.continueAfterHead(index);
+                        if (connection.phase != .reading) return;
                     },
                     .body => |bytes| if (!connection.admin) {
                         connection.exchange.receiveBody(bytes) catch |err| {
@@ -833,11 +1132,93 @@ pub fn Worker(comptime App: type) type {
                     .end => {
                         if (connection.admin) {
                             try self.respondAdmin(index);
-                        } else try self.startResponse(index, connection.exchange.respond(&connection.parser.request));
+                        } else if (isolated_application) {
+                            if (!self.submitApplication(index, .response))
+                                try self.respondStatus(index, 503, false);
+                        } else {
+                            const response = connection.exchange.respond(&connection.parser.request);
+                            if (@hasDecl(App.Exchange, "flushLogs")) connection.exchange.flushLogs(&self.logger);
+                            try self.startResponse(index, response);
+                        }
                         return;
                     },
                 }
             }
+        }
+
+        fn submitApplication(
+            self: *Self,
+            index: usize,
+            stage: ApplicationExecutor.Stage,
+        ) bool {
+            if (!isolated_application) comptime unreachable;
+            const connection = &self.connections[index];
+            connection.phase = .application;
+            connection.application_timed_out = false;
+            const lane = connection.exchange.lane();
+            const deadline_ns = platform.monotonicNs() +
+                @as(u64, App.laneOptions(lane).timeout_ms) * 1_000_000;
+            connection.deadline = deadline_ns;
+            if (self.executor.submit(lane, .{
+                .index = index,
+                .generation = connection.generation,
+                .stage = stage,
+                .deadline_ns = deadline_ns,
+            })) return true;
+            self.metrics.recorder().add(.application_queue_rejections_total, 1);
+            connection.phase = .reading;
+            return false;
+        }
+
+        fn finishApplications(self: *Self) RunError!void {
+            if (!isolated_application) return;
+            while (self.executor.takeCompletion()) |completion| {
+                const index = completion.task.index;
+                const connection = &self.connections[index];
+                if (connection.generation != completion.task.generation or
+                    connection.phase != .application)
+                    continue;
+                if (@hasDecl(App.Exchange, "flushLogs")) connection.exchange.flushLogs(&self.logger);
+                if (completion.expired) self.timeoutApplication(connection);
+                if (connection.application_timed_out) {
+                    try self.forceClose(index);
+                    continue;
+                }
+                switch (completion.task.stage) {
+                    .head => if (completion.response) |response| {
+                        var early = response;
+                        const request = &connection.parser.request;
+                        early.close = early.close or request.chunked or
+                            (request.content_length orelse 0) > 0;
+                        try self.startResponse(index, early);
+                    } else {
+                        connection.phase = .reading;
+                        connection.deadline = platform.monotonicNs() +
+                            @as(u64, self.config.body_timeout_ms) * 1_000_000;
+                        try self.continueAfterHead(index);
+                        if (connection.phase == .reading) try self.processInput(index);
+                    },
+                    .response => try self.startResponse(index, completion.response.?),
+                }
+            }
+        }
+
+        fn continueAfterHead(self: *Self, index: usize) RunError!void {
+            const connection = &self.connections[index];
+            const request = &connection.parser.request;
+            self.event(index, .debug, "request_head", null);
+            if (!request.expect_continue or (!request.chunked and (request.content_length orelse 0) == 0))
+                return;
+            const interim = "HTTP/1.1 100 Continue\r\n\r\n";
+            @memcpy(connection.output_buffer[0..interim.len], interim);
+            connection.output_len = interim.len;
+            connection.output_sent = 0;
+            connection.interim = true;
+            connection.phase = .writing;
+            connection.deadline = @min(connection.deadline, platform.monotonicNs() +
+                @as(u64, self.config.write_timeout_ms) * 1_000_000);
+            self.metrics.recorder().response(100);
+            try self.queueSend(index);
         }
 
         fn respondStatus(self: *Self, index: usize, status: u16, close: bool) RunError!void {
@@ -951,10 +1332,45 @@ pub fn Worker(comptime App: type) type {
                     try self.respondStatus(index, 500, true);
                     return;
                 };
+                if (has_application_metrics) {
+                    const application_snapshot = self.aggregateApplicationMetrics();
+                    ApplicationMetrics.writePrometheus(
+                        &application_snapshot,
+                        &writer,
+                        App.metrics_namespace,
+                    ) catch {
+                        try self.respondStatus(index, 500, true);
+                        return;
+                    };
+                }
                 content_type = metrics_format.prometheus.content_type;
             } else if (std.mem.eql(u8, request.path, "/debug/metrics")) {
                 const snapshot = self.aggregateMetrics();
-                metrics_format.json.write(&snapshot, &writer) catch {
+                var json: std.json.Stringify = .{ .writer = &writer };
+                json.beginObject() catch {
+                    try self.respondStatus(index, 500, true);
+                    return;
+                };
+                metrics_format.json.writeFields(&snapshot, &json) catch {
+                    try self.respondStatus(index, 500, true);
+                    return;
+                };
+                if (has_application_metrics) {
+                    const application_snapshot = self.aggregateApplicationMetrics();
+                    json.objectField("application") catch {
+                        try self.respondStatus(index, 500, true);
+                        return;
+                    };
+                    ApplicationMetrics.writeJson(&application_snapshot, &json) catch {
+                        try self.respondStatus(index, 500, true);
+                        return;
+                    };
+                }
+                json.endObject() catch {
+                    try self.respondStatus(index, 500, true);
+                    return;
+                };
+                writer.writeByte('\n') catch {
                     try self.respondStatus(index, 500, true);
                     return;
                 };
@@ -991,6 +1407,17 @@ pub fn Worker(comptime App: type) type {
             var result: Metrics.Snapshot = .{};
             for (shared.workers) |*worker| {
                 const captured = worker.metrics.snapshot();
+                result.merge(&captured);
+            }
+            return result;
+        }
+
+        fn aggregateApplicationMetrics(self: *const Self) ApplicationMetrics.Snapshot {
+            if (!has_application_metrics) comptime unreachable;
+            const shared = self.shared orelse return self.application_metrics.snapshot();
+            var result: ApplicationMetrics.Snapshot = .{};
+            for (shared.workers) |*worker| {
+                const captured = worker.application_metrics.snapshot();
                 result.merge(&captured);
             }
             return result;
@@ -1310,16 +1737,26 @@ pub fn Worker(comptime App: type) type {
                 self.metrics.recorder().observe(.request_duration_seconds, duration);
                 self.metrics.recorder().observe(if (connection.permit == .admit) .admitted_duration_seconds else .rejected_duration_seconds, duration);
             }
-            if (self.config.access_log and (connection.permit != .reject or self.config.verbose)) self.logger.emit(.{
-                .timestamp_ns = platform.realtimeNs(self.io),
-                .event = "request_complete",
-                .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
-                .request = connection.request_id,
-                .status = connection.response_status,
-                .method = connection.parser.request.method,
-                .duration_ns = duration,
-                .bytes = connection.response_body_bytes,
-            });
+            if (self.config.access_log and (connection.permit != .reject or self.config.verbose)) {
+                if (@hasDecl(App.Exchange, "takeAccessDrops")) {
+                    self.metrics.recorder().add(
+                        .log_dropped_total,
+                        connection.exchange.takeAccessDrops(),
+                    );
+                }
+                self.logger.emit(.{
+                    .timestamp_ns = platform.realtimeNs(self.io),
+                    .event = "request_complete",
+                    .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
+                    .request = connection.request_id,
+                    .status = connection.response_status,
+                    .method = connection.parser.request.method,
+                    .duration_ns = duration,
+                    .bytes = connection.response_body_bytes,
+                    .route = if (@hasDecl(App.Exchange, "routeName")) connection.exchange.routeName() else null,
+                    .fields = if (@hasDecl(App.Exchange, "accessFields")) connection.exchange.accessFields() else &.{},
+                });
+            }
             connection.requests += 1;
             if (connection.close_after_response) {
                 connection.phase = .drain;
@@ -1389,6 +1826,7 @@ pub fn Worker(comptime App: type) type {
 
         fn tick(self: *Self) RunError!void {
             const now = platform.monotonicNs();
+            try self.finishApplications();
             self.captureInspection();
             if (self.worker_id == 0) try self.finishInspections();
             self.admission.refill(now);
@@ -1405,6 +1843,10 @@ pub fn Worker(comptime App: type) type {
                 if (!connection.request_started) {
                     self.metrics.recorder().add(.connections_idle_closed_total, 1);
                     try self.forceClose(index);
+                    continue;
+                }
+                if (connection.phase == .application) {
+                    self.timeoutApplication(connection);
                     continue;
                 }
                 self.metrics.recorder().add(.request_timeouts_total, 1);
@@ -1426,6 +1868,23 @@ pub fn Worker(comptime App: type) type {
                     try self.reject(index, 408, "deadline");
                 } else try self.forceClose(index);
             }
+        }
+
+        fn timeoutApplication(self: *Self, connection: *Connection) void {
+            if (connection.application_timed_out) return;
+            connection.application_timed_out = true;
+            connection.deadline = std.math.maxInt(u64);
+            self.metrics.recorder().add(.request_timeouts_total, 1);
+            self.metrics.recorder().add(.application_timeouts_total, 1);
+            _ = linux.shutdown(connection.fd, linux.SHUT.RDWR);
+        }
+
+        fn hasApplicationWork(self: *const Self) bool {
+            if (!isolated_application) return false;
+            for (self.active_slots[0..self.active_connections]) |index| {
+                if (self.connections[index].phase == .application) return true;
+            }
+            return false;
         }
 
         fn event(self: *Self, index: usize, level: Logger.Level, name: []const u8, reason: ?[]const u8) void {
@@ -1473,6 +1932,8 @@ pub fn Worker(comptime App: type) type {
             for (self.connections, 0..) |connection, index| if (connection.fd >= 0) try self.forceClose(index);
             if (self.ticking) try self.cancelControl(.cancel_tick, .tick);
             if (self.logging) try self.cancelControl(.cancel_log, .log_write);
+            if (self.application_event_pending)
+                try self.cancelControl(.cancel_application, .application);
         }
     };
 }

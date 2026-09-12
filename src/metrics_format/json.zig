@@ -11,7 +11,17 @@ pub const content_type = "application/json";
 /// newline. Does not allocate.
 pub fn write(snapshot: *const Metrics.Snapshot, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     var json: std.json.Stringify = .{ .writer = writer };
+    try writeValue(snapshot, &json);
+    try writer.writeByte('\n');
+}
+
+pub fn writeValue(snapshot: *const Metrics.Snapshot, json: *std.json.Stringify) std.Io.Writer.Error!void {
     try json.beginObject();
+    try writeFields(snapshot, json);
+    try json.endObject();
+}
+
+pub fn writeFields(snapshot: *const Metrics.Snapshot, json: *std.json.Stringify) std.Io.Writer.Error!void {
     try json.objectField("counters");
     try json.beginObject();
     inline for (std.meta.tags(Metrics.Counter)) |counter| {
@@ -41,8 +51,6 @@ pub fn write(snapshot: *const Metrics.Snapshot, writer: *std.Io.Writer) std.Io.W
         try json.endObject();
     }
     try json.endObject();
-    try json.endObject();
-    try writer.writeByte('\n');
 }
 
 test "json metrics preserve names and raw histogram units" {
