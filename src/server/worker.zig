@@ -223,6 +223,8 @@ pub fn Worker(comptime App: type) type {
             drained_bytes: usize = 0,
             permit: ?Admission.Decision = null,
             application_timed_out: bool = false,
+            // Zero outside application work; retained across hooks and body ingestion.
+            application_deadline_ns: u64 = 0,
 
             const Phase = enum { reading, application, inspecting, writing, drain, canceling };
         };
@@ -587,7 +589,10 @@ pub fn Worker(comptime App: type) type {
             std.debug.assert(self.pending == 0);
             if (isolated_application) self.executor.deinit();
             self.ring.deinit();
-            for (self.connections) |connection| if (connection.fd >= 0) platform.close(connection.fd);
+            for (self.connections) |*connection| if (connection.fd >= 0) {
+                self.releaseApplication(connection);
+                platform.close(connection.fd);
+            };
             platform.close(self.listener.fd);
             if (self.admin_listener.fd >= 0) platform.close(self.admin_listener.fd);
             if (self.application_event_fd >= 0) platform.close(self.application_event_fd);
@@ -941,6 +946,7 @@ pub fn Worker(comptime App: type) type {
             connection.close_after_response = false;
             connection.interim = false;
             connection.application_timed_out = false;
+            connection.application_deadline_ns = 0;
             connection.deadline = now + @as(u64, self.config.idle_timeout_ms) * 1_000_000;
         }
 
@@ -1156,8 +1162,11 @@ pub fn Worker(comptime App: type) type {
             connection.phase = .application;
             connection.application_timed_out = false;
             const lane = connection.exchange.lane();
-            const deadline_ns = platform.monotonicNs() +
-                @as(u64, App.laneOptions(lane).timeout_ms) * 1_000_000;
+            if (connection.application_deadline_ns == 0) {
+                connection.application_deadline_ns = platform.monotonicNs() +
+                    @as(u64, App.laneOptions(lane).timeout_ms) * 1_000_000;
+            }
+            const deadline_ns = connection.application_deadline_ns;
             connection.deadline = deadline_ns;
             if (self.executor.submit(lane, .{
                 .index = index,
@@ -1193,8 +1202,11 @@ pub fn Worker(comptime App: type) type {
                         try self.startResponse(index, early);
                     } else {
                         connection.phase = .reading;
-                        connection.deadline = platform.monotonicNs() +
-                            @as(u64, self.config.body_timeout_ms) * 1_000_000;
+                        connection.deadline = @min(
+                            connection.application_deadline_ns,
+                            platform.monotonicNs() +
+                                @as(u64, self.config.body_timeout_ms) * 1_000_000,
+                        );
                         try self.continueAfterHead(index);
                         if (connection.phase == .reading) try self.processInput(index);
                     },
@@ -1565,6 +1577,7 @@ pub fn Worker(comptime App: type) type {
 
         fn startResponse(self: *Self, index: usize, initial: http.Response) RunError!void {
             const connection = &self.connections[index];
+            connection.application_deadline_ns = 0;
             var response = initial;
             if (response.status < 200) {
                 self.event(index, .@"error", "invalid_final_status", null);
@@ -1712,6 +1725,8 @@ pub fn Worker(comptime App: type) type {
                 connection.interim = false;
                 connection.phase = .reading;
                 connection.deadline = platform.monotonicNs() + @as(u64, self.config.body_timeout_ms) * 1_000_000;
+                if (connection.application_deadline_ns != 0)
+                    connection.deadline = @min(connection.deadline, connection.application_deadline_ns);
                 try self.processInput(index);
                 return;
             }
@@ -1758,6 +1773,7 @@ pub fn Worker(comptime App: type) type {
                 });
             }
             connection.requests += 1;
+            self.releaseApplication(connection);
             if (connection.close_after_response) {
                 connection.phase = .drain;
                 connection.deadline = completed_ns + @as(u64, self.config.close_timeout_ms) * 1_000_000;
@@ -1775,6 +1791,14 @@ pub fn Worker(comptime App: type) type {
         fn releasePermit(self: *Self, connection: *Connection) void {
             if (connection.permit) |permit| self.admission.release(permit);
             connection.permit = null;
+        }
+
+        fn releaseApplication(self: *Self, connection: *Connection) void {
+            if (connection.admin) return;
+            if (comptime @hasDecl(App.Exchange, "releaseApplication")) {
+                connection.exchange.releaseApplication(&connection.parser.request);
+                connection.exchange.flushLogs(&self.logger);
+            }
         }
 
         fn forceClose(self: *Self, index: usize) RunError!void {
@@ -1802,6 +1826,7 @@ pub fn Worker(comptime App: type) type {
         fn finishClose(self: *Self, index: usize) void {
             const connection = &self.connections[index];
             if (connection.pending != 0 or connection.fd < 0) return;
+            self.releaseApplication(connection);
             if (connection.request_started and !connection.request_completed) {
                 self.metrics.recorder().add(.requests_aborted_total, 1);
                 if (!connection.admin) self.metrics.recorder().observe(.aborted_duration_seconds, platform.monotonicNs() - connection.started_ns);
@@ -1847,6 +1872,13 @@ pub fn Worker(comptime App: type) type {
                 }
                 if (connection.phase == .application) {
                     self.timeoutApplication(connection);
+                    continue;
+                }
+                if (connection.phase == .reading and connection.application_deadline_ns != 0 and
+                    now >= connection.application_deadline_ns)
+                {
+                    self.timeoutApplication(connection);
+                    try self.forceClose(index);
                     continue;
                 }
                 self.metrics.recorder().add(.request_timeouts_total, 1);

@@ -1,4 +1,4 @@
-//! Embeddable HTTP/1.1 server for Zig 0.16 on Linux x86_64 with io_uring.
+//! Embeddable HTTP/1.1 server for Zig 0.16 on Linux x86-64-v4 with io_uring.
 
 const server = @import("server.zig");
 
@@ -14,6 +14,8 @@ pub const Application = endpoints.Application;
 pub const Body = endpoints.Body;
 pub const Call = endpoints.Call;
 pub const EndpointError = endpoints.EndpointError;
+pub const JsonError = endpoints.JsonError;
+pub const max_json_depth = endpoints.max_json_depth;
 pub const Method = endpoints.Method;
 pub const Status = endpoints.Status;
 pub const endpoint = endpoints.endpoint;

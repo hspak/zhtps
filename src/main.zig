@@ -12,7 +12,7 @@ fn stopSignal(_: linux.SIG) callconv(.c) void {
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len == 2 and std.mem.eql(u8, args[1], "--help")) {
-        try std.Io.File.stdout().writeStreamingAll(init.io, "ZHTPS — Linux x86_64 io_uring HTTP/1.1 server\n" ++
+        try std.Io.File.stdout().writeStreamingAll(init.io, "ZHTPS — Linux x86-64-v4 io_uring HTTP/1.1 server\n" ++
             "  --address IP                 default 127.0.0.1\n" ++
             "  --port PORT                  default 8080; 0 chooses a free port\n" ++
             "  --admin-address IP           default 127.0.0.1\n" ++

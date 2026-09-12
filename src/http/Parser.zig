@@ -117,6 +117,20 @@ pub fn feed(parser: *Parser, input: []const u8) Error!Step {
                 return error.InvalidHeader;
             if (!parser.first_line and c != '\r' and c != '\n') {
                 const available = @min(input.len - consumed, parser.head_storage.len - parser.head_len);
+                if (available >= 64) {
+                    const bytes: @Vector(64, u8) = input[consumed..][0..64].*;
+                    const cr = bytes == @as(@Vector(64, u8), @splat('\r'));
+                    const lf = bytes == @as(@Vector(64, u8), @splat('\n'));
+                    const mask: u64 = @bitCast(cr | lf);
+                    const length = if (mask == 0) 64 else @ctz(mask);
+                    @memcpy(
+                        parser.head_storage[parser.head_len..][0..length],
+                        input[consumed..][0..length],
+                    );
+                    parser.head_len += length;
+                    consumed += length;
+                    continue;
+                }
                 if (available >= 16) {
                     const bytes: @Vector(16, u8) = input[consumed..][0..16].*;
                     const cr = bytes == @as(@Vector(16, u8), @splat('\r'));
@@ -438,8 +452,8 @@ test "incomplete body reports truncation and body size is bounded" {
 
 test "header block scans preserve line endings fragmentation and pipeline boundaries" {
     const testing = std.testing;
-    const padding = "a" ** 64;
-    for (0..49) |length| {
+    const padding = "a" ** 96;
+    for (0..97) |length| {
         var storage: [256]u8 = undefined;
         const wire = try std.fmt.bufPrint(
             &storage,
@@ -470,8 +484,8 @@ test "header block scans preserve line endings fragmentation and pipeline bounda
 test "header block scans respect exact storage limits and unaligned input" {
     const testing = std.testing;
     const wire = "GET / HTTP/1.1\r\nHost: local\r\nX-Pad: " ++ "a" ** 64 ++ "\r\n\r\n";
-    var input: [wire.len + 32]u8 = undefined;
-    for (0..32) |offset| {
+    var input: [wire.len + 64]u8 = undefined;
+    for (0..64) |offset| {
         @memcpy(input[offset..][0..wire.len], wire);
         for (wire.len - 1..wire.len + 2) |capacity| {
             var head: [wire.len + 3]u8 = @splat(0xa5);
@@ -590,8 +604,11 @@ test "field bytes retain validation at vector boundaries" {
         64,
         65,
         96,
+        127,
+        128,
+        129,
     };
-    var wire: [prefix.len + 96 + 4]u8 = undefined;
+    var wire: [prefix.len + 129 + 4]u8 = undefined;
     var head: [256]u8 = undefined;
     var trailers: [2]u8 = undefined;
     for (lengths) |length| {

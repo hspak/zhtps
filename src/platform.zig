@@ -1,4 +1,4 @@
-//! Linux x86_64 primitives used outside the io_uring submission/completion loop.
+//! Linux x86-64-v4 primitives used outside the io_uring submission/completion loop.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -9,6 +9,13 @@ const log = std.log.scoped(.platform);
 comptime {
     if (builtin.os.tag != .linux or builtin.cpu.arch != .x86_64)
         @compileError("ZHTPS requires Linux on x86_64");
+    if (!builtin.cpu.hasAll(.x86, &.{
+        .avx512bw,
+        .avx512cd,
+        .avx512dq,
+        .avx512f,
+        .avx512vl,
+    })) @compileError("ZHTPS requires the x86-64-v4 instruction set");
 }
 
 pub const Error = error{

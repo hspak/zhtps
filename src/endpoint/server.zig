@@ -5,6 +5,7 @@ const Config = @import("../Config.zig");
 const server = @import("../server.zig");
 const log = std.log.scoped(.endpoint_server);
 
+/// Owns the transport and executor resources for a generated application.
 pub fn Server(comptime App: type) type {
     return struct {
         const Self = @This();
@@ -17,8 +18,11 @@ pub fn Server(comptime App: type) type {
             services: *Services,
         };
 
-        /// Binds listeners, allocates fixed worker and lane storage, and borrows
-        /// application services through deinit. Call deinit after success.
+        /// Binds listeners and allocates fixed worker and lane storage. Borrows
+        /// gpa, io, configuration strings, log descriptor and services through deinit.
+        /// io must support concurrent wall-clock reads and the I/O used by hooks.
+        /// Errors release acquired resources and leave self undefined. On success,
+        /// self may move but must not be copied. Call deinit even if never served.
         pub fn init(
             self: *Self,
             gpa: std.mem.Allocator,
@@ -30,7 +34,7 @@ pub fn Server(comptime App: type) type {
                 gpa,
                 io,
                 config,
-                if (Services == void) {} else options.services,
+                if (comptime Services == void) {} else options.services,
             );
         }
 
@@ -44,17 +48,24 @@ pub fn Server(comptime App: type) type {
             return self.inner.adminPort();
         }
 
-        /// Runs transport workers and bounded application lanes until stopped.
+        /// Runs once per initialization; repeat calls return AlreadyServed. Keep
+        /// self at a stable address until return. Joins all workers and application
+        /// threads, including on error. A nonreturning hook prevents return even
+        /// after shutdown_timeout_ms. A stop requested before serving is honored.
         pub fn serve(self: *Self) server.RunError!void {
             return self.inner.serve();
         }
 
-        /// Requests graceful shutdown without waiting and is safe to repeat.
+        /// Requests graceful shutdown without waiting. Safe from another thread
+        /// after init and before deinit, and safe to repeat. The grace deadline
+        /// cannot terminate application code; serve waits for running hooks.
         pub fn requestStop(self: *const Self) void {
             self.inner.requestStop();
         }
 
-        /// Releases server resources after serving has returned.
+        /// Releases server resources. Asserts serve is not running; join its
+        /// calling thread first. Borrowed services and descriptors remain owned
+        /// by the caller. Also valid when serve was never called.
         pub fn deinit(self: *Self) void {
             self.inner.deinit();
             self.* = undefined;

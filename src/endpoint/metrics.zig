@@ -3,6 +3,8 @@
 const std = @import("std");
 const log = std.log.scoped(.endpoint_metrics);
 
+/// Generates fixed storage from metric enums; void disables custom metrics while
+/// retaining the same API. Names must be unique across all emitted series.
 pub fn Metrics(comptime Definition: type) type {
     const Counter = if (Definition != void and @hasDecl(Definition, "Counter"))
         Definition.Counter
@@ -19,6 +21,7 @@ pub fn Metrics(comptime Definition: type) type {
     validateEnum(Counter, "Counter");
     validateEnum(Gauge, "Gauge");
     validateEnum(Histogram, "Histogram");
+    validateNames(Counter, Gauge, Histogram);
 
     return struct {
         const Self = @This();
@@ -60,11 +63,13 @@ pub fn Metrics(comptime Definition: type) type {
                 sum_ns: u64 = 0,
             };
 
+            /// Adds another worker's samples, including gauges; totals wrap on overflow.
             pub fn merge(captured: *Snapshot, other: *const Snapshot) void {
                 for (&captured.counters, other.counters) |*total, amount| total.* +%= amount;
                 for (&captured.gauges, other.gauges) |*total, amount| total.* +%= amount;
                 for (&captured.histograms, other.histograms) |*total, distribution| {
-                    for (&total.buckets, distribution.buckets) |*bucket, amount| bucket.* +%= amount;
+                    for (&total.buckets, distribution.buckets) |*bucket, amount|
+                        bucket.* +%= amount;
                     total.sum_ns +%= distribution.sum_ns;
                 }
             }
@@ -90,6 +95,8 @@ pub fn Metrics(comptime Definition: type) type {
             _ = distribution.sum_ns.fetchAdd(nanoseconds, .monotonic);
         }
 
+        /// Returns owned samples from atomic reads, not a transactionally consistent
+        /// view. Concurrent updates may appear in different samples.
         pub fn snapshot(metrics: *const Self) Snapshot {
             var result: Snapshot = undefined;
             for (&metrics.counters, &result.counters) |*source, *destination| {
@@ -107,11 +114,13 @@ pub fn Metrics(comptime Definition: type) type {
             return result;
         }
 
+        /// Emits seconds-based histogram series with a validated, nonreserved prefix.
         pub fn writePrometheus(
             captured: *const Snapshot,
             writer: *std.Io.Writer,
-            namespace: []const u8,
+            comptime namespace: []const u8,
         ) std.Io.Writer.Error!void {
+            comptime validateNamespace(namespace);
             inline for (std.meta.tags(Counter)) |id| {
                 const name = @tagName(id);
                 try writer.print("# TYPE {s}_{s} counter\n{s}_{s} {d}\n", .{
@@ -164,7 +173,11 @@ pub fn Metrics(comptime Definition: type) type {
             }
         }
 
-        pub fn writeJson(captured: *const Snapshot, json: *std.json.Stringify) std.Io.Writer.Error!void {
+        /// Emits an object with raw, noncumulative histogram buckets in nanoseconds.
+        pub fn writeJson(
+            captured: *const Snapshot,
+            json: *std.json.Stringify,
+        ) std.Io.Writer.Error!void {
             try json.beginObject();
             try json.objectField("counters");
             try json.beginObject();
@@ -202,6 +215,61 @@ pub fn Metrics(comptime Definition: type) type {
 
 fn validateEnum(comptime T: type, comptime name: []const u8) void {
     if (@typeInfo(T) != .@"enum") @compileError(name ++ " must be an enum");
+    if (!@typeInfo(T).@"enum".is_exhaustive)
+        @compileError("metric enums must be exhaustive and numbered from zero without gaps");
+    for (std.meta.fields(T), 0..) |field, index| {
+        if (field.value != index)
+            @compileError("metric enums must be exhaustive and numbered from zero without gaps");
+    }
+}
+
+/// Requires a metric identifier outside the server's reserved zhtps namespace.
+pub fn validateNamespace(comptime namespace: []const u8) void {
+    validateName(namespace);
+    if (std.mem.eql(u8, namespace, "zhtps") or std.mem.startsWith(u8, namespace, "zhtps_"))
+        @compileError("the zhtps metric namespace is reserved");
+}
+
+fn validateName(comptime name: []const u8) void {
+    if (name.len == 0 or (!std.ascii.isAlphabetic(name[0]) and name[0] != '_'))
+        @compileError("metric names must start with a letter or underscore");
+    for (name) |byte| {
+        if (!std.ascii.isAlphanumeric(byte) and byte != '_')
+            @compileError("metric names must contain only letters, digits and underscores");
+    }
+}
+
+fn validateNames(comptime Counter: type, comptime Gauge: type, comptime Histogram: type) void {
+    const count = std.meta.fields(Counter).len + std.meta.fields(Gauge).len +
+        4 * std.meta.fields(Histogram).len;
+    var names: [count][]const u8 = undefined;
+    var index: usize = 0;
+    @setEvalBranchQuota(10_000 + count * count * 1000);
+    for (.{ Counter, Gauge }) |T| {
+        for (std.meta.fields(T)) |field| {
+            validateName(field.name);
+            names[index] = field.name;
+            index += 1;
+        }
+    }
+    for (std.meta.fields(Histogram)) |field| {
+        validateName(field.name);
+        for (.{
+            "",
+            "_bucket",
+            "_count",
+            "_sum",
+        }) |suffix| {
+            names[index] = field.name ++ suffix;
+            index += 1;
+        }
+    }
+    for (names, 0..) |name, at| {
+        for (names[at + 1 ..]) |other| {
+            if (std.mem.eql(u8, name, other))
+                @compileError("duplicate emitted metric name: " ++ name);
+        }
+    }
 }
 
 test "custom metrics aggregate and format without dynamic names" {
@@ -230,5 +298,9 @@ test "custom metrics aggregate and format without dynamic names" {
         writer.buffered(),
         "example_widgets_created_total 5\n",
     ) != null);
-    try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "example_jobs_active 3\n") != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        writer.buffered(),
+        "example_jobs_active 3\n",
+    ) != null);
 }

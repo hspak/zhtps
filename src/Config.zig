@@ -17,6 +17,9 @@ header_bytes: usize = 32 * 1024,
 trailer_bytes: usize = 8 * 1024,
 receive_bytes: usize = 16 * 1024,
 response_bytes: usize = 32 * 1024,
+/// Total request body and handler scratch budget. After body ingestion, its
+/// unused tail becomes scratch retained through cleanup. JSON endpoints need
+/// room beyond their largest body for parsing and response serialization.
 application_bytes: usize = 64 * 1024,
 max_body_bytes: u64 = 64 * 1024 * 1024,
 max_chunk_framing_bytes: u64 = 64 * 1024,

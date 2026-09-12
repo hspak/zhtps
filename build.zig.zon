@@ -17,6 +17,7 @@
         "examples/embedded/build.zig",
         "examples/embedded/build.zig.zon",
         "examples/embedded/main.zig",
+        "examples/embedded/endpoints.zig",
         "tests",
         "bench",
         "deploy",

@@ -137,8 +137,9 @@ pub fn Server(comptime App: type) type {
         }
 
         /// Requests graceful shutdown without waiting. Safe to call repeatedly
-        /// from another thread after init and before deinit. Active work drains
-        /// within shutdown_timeout_ms, then remaining operations are canceled.
+        /// from another thread after init and before deinit. shutdown_timeout_ms
+        /// limits the grace period; application hooks must still return before
+        /// their storage can be released, so serve can wait beyond that deadline.
         pub fn requestStop(self: *const Self) void {
             self.shared.abort.store(true, .monotonic);
         }

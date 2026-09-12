@@ -18,6 +18,13 @@ pub fn isToken(bytes: []const u8) bool {
 
 pub fn isField(bytes: []const u8) bool {
     var offset: usize = 0;
+    while (bytes.len - offset >= 64) : (offset += 64) {
+        const part: @Vector(64, u8) = bytes[offset..][0..64].*;
+        const control = part < @as(@Vector(64, u8), @splat(0x20));
+        const not_tab = part != @as(@Vector(64, u8), @splat('\t'));
+        const del = part == @as(@Vector(64, u8), @splat(0x7f));
+        if (@reduce(.Or, (control & not_tab) | del)) return false;
+    }
     while (bytes.len - offset >= 32) : (offset += 32) {
         const part: @Vector(32, u8) = bytes[offset..][0..32].*;
         const control = part < @as(@Vector(32, u8), @splat(0x20));
