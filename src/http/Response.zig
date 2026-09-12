@@ -1,6 +1,7 @@
 //! Response metadata and framing. The caller retains ownership of body and fields.
 
 const std = @import("std");
+const zeit = @import("zeit");
 const http = @import("../http.zig");
 const syntax = @import("syntax.zig");
 const log = std.log.scoped(.http_response);
@@ -78,6 +79,7 @@ pub const Encoder = struct {
 pub fn begin(response: Response, writer: *std.Io.Writer, request: *const http.Request, date: *const [29]u8) Error!Encoder {
     if (response.status < 100 or response.status > 599 or response.status == 101)
         return error.InvalidStatus;
+    if (request.version == .http_1_0 and response.status < 200) return error.InvalidStatus;
     const connect = std.mem.eql(u8, request.method, "CONNECT");
     if (connect and response.status >= 200 and response.status < 300) return error.InvalidStatus;
     for (response.headers) |field| {
@@ -102,7 +104,7 @@ pub fn begin(response: Response, writer: *std.Io.Writer, request: *const http.Re
     const head = std.mem.eql(u8, request.method, "HEAD");
     const closing = response.close or !request.keep_alive or
         (length == null and request.version == .http_1_0 and !head and !no_body);
-    const chunked = length == null and !no_body and !head and !closing;
+    const chunked = length == null and !no_body and !head and request.version == .http_1_1;
     if (response.status == 200) {
         try writer.writeAll(if (request.version == .http_1_0)
             "HTTP/1.0 200 OK\r\nDate: "
@@ -196,26 +198,35 @@ pub fn reason(status: u16) []const u8 {
     };
 }
 
-/// Formats a Unix timestamp in seconds as an HTTP IMF-fixdate in GMT.
+/// A bounded explanation for built-in errors. Overload responses remain empty
+/// to bound rejection bandwidth; other response statuses have no default body.
+pub fn errorBody(status: u16) []const u8 {
+    return switch (status) {
+        400 => "400 Bad Request: the request syntax or parameters are invalid.\n",
+        404 => "404 Not Found: no resource matches this path.\n",
+        405 => "405 Method Not Allowed: use a method listed in Allow.\n",
+        408 => "408 Request Timeout: the request did not arrive before its deadline.\n",
+        412 => "412 Precondition Failed: a request condition does not match the resource.\n",
+        413 => "413 Content Too Large: the request exceeds the configured body limit.\n",
+        414 => "414 URI Too Long: the request target exceeds the configured limit.\n",
+        417 => "417 Expectation Failed: the request expectation is unsupported.\n",
+        421 => "421 Misdirected Request: this cleartext listener cannot serve an HTTPS target.\n",
+        431 => "431 Request Header Fields Too Large: request fields exceed configured limits.\n",
+        500 => "500 Internal Server Error: the server could not produce the response.\n",
+        501 => "501 Not Implemented: the method or transfer coding is unsupported.\n",
+        505 => "505 HTTP Version Not Supported: use HTTP/1.0 or HTTP/1.1.\n",
+        else => "",
+    };
+}
+
+/// Formats Unix seconds as an HTTP IMF-fixdate in GMT. Asserts the year fits
+/// four digits; HTTP cannot represent years after 9999.
 pub fn formatDate(seconds: u64, buffer: *[29]u8) void {
-    const epoch: std.time.epoch.EpochSeconds = .{ .secs = seconds };
-    const day = epoch.getEpochDay();
-    const year_day = day.calculateYearDay();
-    const month_day = year_day.calculateMonthDay();
-    const clock = epoch.getDaySeconds();
-    const days = "SunMonTueWedThuFriSat";
-    const months = "JanFebMarAprMayJunJulAugSepOctNovDec";
-    const weekday: usize = @intCast((day.day + 4) % 7);
-    const month: usize = month_day.month.numeric() - 1;
-    _ = std.fmt.bufPrint(buffer, "{s}, {d:0>2} {s} {d:0>4} {d:0>2}:{d:0>2}:{d:0>2} GMT", .{
-        days[weekday * 3 ..][0..3],
-        month_day.day_index + 1,
-        months[month * 3 ..][0..3],
-        year_day.year,
-        clock.getHoursIntoDay(),
-        clock.getMinutesIntoHour(),
-        clock.getSecondsIntoMinute(),
-    }) catch unreachable;
+    std.debug.assert(seconds < (zeit.Time{ .year = 10000 }).instant().unixTimestamp());
+    const time = zeit.instant(.{ .unix_timestamp = @intCast(seconds) }, &zeit.utc).time();
+    var writer = std.Io.Writer.fixed(buffer);
+    time.strftime(&writer, "%a, %d %b %Y %H:%M:%S GMT") catch unreachable;
+    std.debug.assert(writer.buffered().len == buffer.len);
 }
 
 test "HEAD carries representation length without body and 204 has no framing fields" {
@@ -268,4 +279,38 @@ test "response rejects header injection before writing and enforces declared len
     try encoder.write(&writer, "ab");
     try std.testing.expectError(error.LengthMismatch, encoder.end(&writer));
     try std.testing.expectError(error.LengthMismatch, encoder.write(&writer, "cd"));
+}
+
+test "RFC informational responses reject HTTP 1.0 before writing" {
+    const testing = std.testing;
+    var buffer: [1024]u8 = undefined;
+    const date = "Thu, 01 Jan 1970 00:00:00 GMT";
+    for (100..200) |status| {
+        var writer = std.Io.Writer.fixed(&buffer);
+        try testing.expectError(error.InvalidStatus, (Response{ .status = @intCast(status) }).begin(
+            &writer,
+            &.{ .method = "GET", .version = .http_1_0, .keep_alive = false },
+            date,
+        ));
+        try testing.expectEqual(@as(usize, 0), writer.buffered().len);
+    }
+    var writer = std.Io.Writer.fixed(&buffer);
+    _ = try (Response{ .status = 103 }).write(&writer, &.{ .method = "GET" }, date);
+    try testing.expect(std.mem.startsWith(u8, writer.buffered(), "HTTP/1.1 103 Early Hints\r\n"));
+    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Content-Length") == null);
+}
+
+test "HTTP Date formatting uses UTC across leap centuries and the year limit" {
+    const cases = [_]struct { timestamp: u64, text: []const u8 }{
+        .{ .timestamp = 951827696, .text = "Tue, 29 Feb 2000 12:34:56 GMT" },
+        .{ .timestamp = 4107542400, .text = "Mon, 01 Mar 2100 00:00:00 GMT" },
+        .{ .timestamp = 13574563200, .text = "Tue, 29 Feb 2400 00:00:00 GMT" },
+        .{ .timestamp = 253402300799, .text = "Fri, 31 Dec 9999 23:59:59 GMT" },
+    };
+    var buffer: [29]u8 = undefined;
+    for (cases) |case| {
+        formatDate(case.timestamp, &buffer);
+        try std.testing.expectEqualStrings(case.text, &buffer);
+        try std.testing.expectEqual(@as(?i64, @intCast(case.timestamp)), http.date.parse(&buffer, 0));
+    }
 }

@@ -8,9 +8,13 @@ const Request = @This();
 
 method: []const u8 = "",
 target: []const u8 = "",
+/// The parser preserves path octets; Server replaces this with a normalized
+/// routing path while preserving target and all header values.
 path: []const u8 = "",
 query: []const u8 = "",
 authority: []const u8 = "",
+/// Explicit scheme in parsed metadata. Server fills origin-form scheme and
+/// empty authority from its listener before calling application hooks.
 scheme: ?[]const u8 = null,
 version: http.Version = .http_1_1,
 headers: []const http.Header = &.{},

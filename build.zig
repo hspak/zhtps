@@ -4,11 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const error_tracing = b.option(bool, "error-tracing", "Override error return tracing (use false for the Zig 0.16 fuzz runner)");
+    const zeit = b.dependency("zeit", .{ .target = target, .optimize = optimize }).module("zeit");
     const mod = b.addModule("zhtps", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
         .error_tracing = error_tracing,
+        .imports = &.{.{ .name = "zeit", .module = zeit }},
     });
     const exe = b.addExecutable(.{
         .name = "zhtps",
@@ -19,7 +21,9 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "zhtps", .module = mod }},
         }),
     });
-    b.installArtifact(exe);
+    exe.pie = true;
+    if (b.option(bool, "build-server", "Install the standalone server executable") orelse true)
+        b.installArtifact(exe);
     const run = b.addRunArtifact(exe);
     if (b.args) |args| run.addArgs(args);
     b.step("run", "Run the HTTP server").dependOn(&run.step);
@@ -31,9 +35,21 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
     b.step("test", "Run protocol and component tests").dependOn(&b.addRunArtifact(tests).step);
+    const consumer = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "build",
+        "test",
+        "--global-cache-dir",
+        b.graph.global_cache_root.path.?,
+    });
+    consumer.addArg(b.fmt("-Doptimize={s}", .{@tagName(optimize)}));
+    consumer.setCwd(b.path("examples/embedded"));
+    b.step("test-library", "Build and test a separate project importing zhtps").dependOn(&consumer.step);
     const wire = b.addSystemCommand(&.{ "python3", "tests/wire.py" });
     wire.addArtifactArg(exe);
     b.step("test-wire", "Run raw TCP integration and overload tests").dependOn(&wire.step);
+    const deployment = b.addSystemCommand(&.{ "python3", "tests/deploy_security.py" });
+    b.step("test-deploy", "Check deployment input and file safety").dependOn(&deployment.step);
     const hot_paths = b.addExecutable(.{
         .name = "hot-paths",
         .root_module = b.createModule(.{
@@ -48,4 +64,14 @@ pub fn build(b: *std.Build) void {
     b.step("bench-hot-paths", "Measure admission, metrics, and parsing CPU costs").dependOn(&run_hot_paths.step);
     const install_hot_paths = b.addInstallArtifact(hot_paths, .{});
     b.step("install-hot-paths", "Install the hot path benchmark").dependOn(&install_hot_paths.step);
+    const request_costs = b.addExecutable(.{
+        .name = "request-costs",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("docs/request-critical-path/measure.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zhtps", .module = mod }},
+        }),
+    });
+    b.step("install-request-costs", "Install the request cost benchmark").dependOn(&b.addInstallArtifact(request_costs, .{}).step);
 }

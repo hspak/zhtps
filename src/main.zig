@@ -19,7 +19,7 @@ pub fn main(init: std.process.Init) !void {
             "  --admin-port PORT            default 9090; 0 chooses a free port\n" ++
             "  --workers N                  event-loop threads/rings; default 1\n" ++
             "  --max-connections N          per worker; default 256\n" ++
-            "  --admin-connections N        reserved admin slots; default 8\n" ++
+            "  --admin-connections N        reserved admin slots; 0 disables; default 8\n" ++
             "  --completion-budget N        completions per loop; default 64\n" ++
             "  --log-slots N                buffered JSON records; default 256\n" ++
             "  --max-active N               per worker; default 3/4 of public slots, min 1\n" ++
@@ -34,6 +34,7 @@ pub fn main(init: std.process.Init) !void {
             "  --close-timeout-ms N         bounded response drain; default 100\n" ++
             "  --shutdown-timeout-ms N      graceful drain; default 5000\n" ++
             "  --max-body-bytes N           default 67108864\n" ++
+            "  --max-chunk-framing-bytes N  cumulative chunk overhead; default 65536\n" ++
             "  --max-requests N             per connection; default 1000\n" ++
             "  --no-access-log              omit per-response logs; keep metrics\n" ++
             "  --verbose                    include JSON debug events\n");
@@ -50,7 +51,7 @@ pub fn main(init: std.process.Init) !void {
     };
     _ = try zhtps.platform.check(linux.sigaction(.TERM, &action, null));
     _ = try zhtps.platform.check(linux.sigaction(.INT, &action, null));
-    zhtps.Server(zhtps.application).run(init.gpa, config, &stopping) catch |err| {
+    zhtps.DefaultServer.run(init.gpa, init.io, config, &stopping) catch |err| {
         try fatal(init.io, @errorName(err));
         std.process.exit(1);
     };
@@ -60,7 +61,7 @@ fn fatal(io: std.Io, reason: []const u8) !void {
     var buffer: [1024]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
     try std.json.Stringify.value(.{
-        .timestamp_ns = zhtps.platform.realtimeNs(),
+        .timestamp_ns = zhtps.platform.realtimeNs(io),
         .level = "error",
         .event = "startup_or_runtime_error",
         .reason = reason,

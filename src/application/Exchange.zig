@@ -17,6 +17,18 @@ fields: [3]http.Header = undefined,
 
 pub const BodyError = error{BodyTooLarge};
 
+const root_body = "ZHTPS\n";
+const stream_fragments = [_][]const u8{
+    "one\n",
+    "two\n",
+    "three\n",
+};
+const stream_length = length: {
+    var size: u64 = 0;
+    for (stream_fragments) |fragment| size += fragment.len;
+    break :length size;
+};
+
 pub fn init(exchange: *Exchange, storage: []u8) void {
     exchange.* = .{ .storage = storage };
 }
@@ -33,8 +45,9 @@ pub fn receiveHead(exchange: *Exchange, request: *const http.Request) ?http.Resp
     else
         .missing;
     if (std.mem.eql(u8, request.method, "OPTIONS")) return null;
-    const known = std.meta.stringToEnum(std.http.Method, request.method) != null;
-    if (!known) return exchange.earlyStatus(501);
+    const implemented = std.mem.eql(u8, request.method, "GET") or
+        std.mem.eql(u8, request.method, "HEAD") or std.mem.eql(u8, request.method, "POST");
+    if (!implemented) return exchange.earlyStatus(501);
     if (exchange.route == .missing) return exchange.earlyStatus(404);
     if (exchange.route == .echo) {
         if (!std.mem.eql(u8, request.method, "POST")) return exchange.earlyStatus(405);
@@ -53,7 +66,7 @@ pub fn receiveHead(exchange: *Exchange, request: *const http.Request) ?http.Resp
         return .{
             .status = 304,
             .headers = exchange.fields[0..1],
-            .body = .{ .stream = if (exchange.route == .root) 6 else 14 },
+            .body = .{ .stream = if (exchange.route == .root) root_body.len else stream_length },
             // The head is already consumed. With no content, its boundary
             // is also the request boundary and pipelined bytes stay intact.
             .close = request.chunked or (request.content_length orelse 0) > 0,
@@ -63,10 +76,12 @@ pub fn receiveHead(exchange: *Exchange, request: *const http.Request) ?http.Resp
 }
 
 fn earlyStatus(exchange: *Exchange, status: u16) http.Response {
-    exchange.fields[0] = .{ .name = "Allow", .value = exchange.allowedMethods() };
+    exchange.fields[0] = .{ .name = "Content-Type", .value = "text/plain; charset=utf-8" };
+    exchange.fields[1] = .{ .name = "Allow", .value = exchange.allowedMethods() };
     return .{
         .status = status,
-        .headers = if (status == 405) exchange.fields[0..1] else &.{},
+        .headers = exchange.fields[0..if (status == 405) @as(usize, 2) else 1],
+        .body = .{ .bytes = http.Response.errorBody(status) },
         .close = true,
     };
 }
@@ -91,13 +106,8 @@ pub fn allowedMethods(exchange: *const Exchange) []const u8 {
 /// until the next call or exchange completion. The transport may copy fragments
 /// and batch producer calls before sending. No producer work is performed for HEAD.
 pub fn produce(exchange: *Exchange, destination: []u8) ?[]const u8 {
-    const fragments = [_][]const u8{
-        "one\n",
-        "two\n",
-        "three\n",
-    };
-    if (exchange.route != .stream or exchange.used == fragments.len) return null;
-    const bytes = fragments[exchange.used];
+    if (exchange.route != .stream or exchange.used == stream_fragments.len) return null;
+    const bytes = stream_fragments[exchange.used];
     exchange.used += 1;
     @memcpy(destination[0..bytes.len], bytes);
     return destination[0..bytes.len];
@@ -126,7 +136,7 @@ pub fn respond(exchange: *Exchange, request: *const http.Request) http.Response 
                 .{ .name = "Content-Type", .value = "text/plain; charset=utf-8" },
                 .{ .name = "ETag", .value = "\"zhtps-root-v1\"" },
             },
-            .body = .{ .bytes = "ZHTPS\n" },
+            .body = .{ .bytes = root_body },
         },
         .echo => .{
             .headers = &.{.{ .name = "Content-Type", .value = "application/octet-stream" }},
@@ -139,6 +149,6 @@ pub fn respond(exchange: *Exchange, request: *const http.Request) http.Response 
             },
             .body = .{ .stream = null },
         },
-        .missing => .{ .status = 404 },
+        .missing => exchange.earlyStatus(404),
     };
 }

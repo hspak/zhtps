@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const zeit = @import("zeit");
 pub const linux = std.os.linux;
 const log = std.log.scoped(.platform);
 
@@ -36,11 +37,11 @@ pub fn monotonicNs() u64 {
     return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
 }
 
-pub fn realtimeNs() u64 {
-    var ts: linux.timespec = undefined;
-    std.debug.assert(linux.clock_gettime(.REALTIME, &ts) == 0);
-    if (ts.sec < 0) return 0;
-    return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
+/// Reads UTC wall time through zeit. Pre-epoch clocks clamp to zero for logs
+/// and Date; elapsed durations use monotonicNs instead.
+pub fn realtimeNs(io: std.Io) u64 {
+    const timestamp = zeit.instant(.{ .now = io }, &zeit.utc).timestamp;
+    return @intCast(@max(0, timestamp));
 }
 
 pub fn close(fd: linux.fd_t) void {
@@ -56,9 +57,15 @@ pub const Listener = struct {
     port: u16,
 };
 
+pub const ListenOptions = struct {
+    backlog: u31 = 128,
+    /// Only listeners serving the same trust domain may share a port.
+    reuse_port: bool = false,
+};
+
 /// Returns an owned listener; the caller closes it after stopping its accepts.
 /// A zero port requests a kernel-assigned port, returned in the result.
-pub fn listen(address: []const u8, port: u16, backlog: u31) Error!Listener {
+pub fn listen(address: []const u8, port: u16, options: ListenOptions) Error!Listener {
     const ip = std.Io.net.IpAddress.parse(address, port) catch return error.InvalidAddress;
     const domain: u32 = switch (ip) {
         .ip4 => linux.AF.INET,
@@ -71,7 +78,7 @@ pub fn listen(address: []const u8, port: u16, backlog: u31) Error!Listener {
     )));
     errdefer close(fd);
     try setOption(fd, linux.SOL.SOCKET, linux.SO.REUSEADDR, 1);
-    try setOption(fd, linux.SOL.SOCKET, linux.SO.REUSEPORT, 1);
+    if (options.reuse_port) try setOption(fd, linux.SOL.SOCKET, linux.SO.REUSEPORT, 1);
     var actual_port: u16 = 0;
     switch (ip) {
         .ip4 => |v4| {
@@ -99,6 +106,6 @@ pub fn listen(address: []const u8, port: u16, backlog: u31) Error!Listener {
             actual_port = std.mem.bigToNative(u16, addr.port);
         },
     }
-    _ = try check(linux.listen(fd, backlog));
+    _ = try check(linux.listen(fd, options.backlog));
     return .{ .fd = fd, .port = actual_port };
 }

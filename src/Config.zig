@@ -11,6 +11,7 @@ admin_address: []const u8 = "127.0.0.1",
 admin_port: u16 = 9090,
 workers: usize = 1,
 max_connections: usize = 256,
+/// Zero disables the admin listener and its reserved connection storage.
 admin_connections: usize = 8,
 header_bytes: usize = 32 * 1024,
 trailer_bytes: usize = 8 * 1024,
@@ -18,6 +19,7 @@ receive_bytes: usize = 16 * 1024,
 response_bytes: usize = 32 * 1024,
 application_bytes: usize = 64 * 1024,
 max_body_bytes: u64 = 64 * 1024 * 1024,
+max_chunk_framing_bytes: u64 = 64 * 1024,
 header_timeout_ms: u32 = 5000,
 body_timeout_ms: u32 = 30000,
 write_timeout_ms: u32 = 5000,
@@ -27,6 +29,9 @@ shutdown_timeout_ms: u32 = 5000,
 max_requests_per_connection: u32 = 1000,
 completion_budget: usize = 64,
 log_slots: usize = 256,
+/// Borrowed descriptor for JSON events; null disables logging. Keep it open
+/// until serving returns. Writers outside this server must coordinate access.
+log_fd: ?i32 = 2,
 verbose: bool = false,
 access_log: bool = true,
 admission: AdmissionOptions = .{},
@@ -50,7 +55,7 @@ pub const Error = error{
 pub fn validate(config: Config) Error!void {
     if (config.workers == 0 or config.workers > 256 or
         config.max_connections == 0 or config.max_connections > 8176 or
-        config.admin_connections == 0 or config.admin_connections > 128 or
+        config.admin_connections > 128 or
         config.max_connections + config.admin_connections > 8176 or
         config.header_bytes < 8192 or config.header_bytes > 1024 * 1024 or
         config.trailer_bytes < 2 or config.trailer_bytes > 1024 * 1024 or
@@ -59,12 +64,14 @@ pub fn validate(config: Config) Error!void {
         config.application_bytes < 32 * 1024 or config.application_bytes > 16 * 1024 * 1024 or
         config.log_slots == 0 or config.log_slots > 65536 or
         config.completion_budget == 0 or config.completion_budget > 256 or
+        config.max_chunk_framing_bytes < 3 or
         config.max_requests_per_connection == 0 or config.header_timeout_ms == 0 or
         config.body_timeout_ms == 0 or config.write_timeout_ms == 0 or
         config.idle_timeout_ms == 0 or config.close_timeout_ms == 0 or
         config.shutdown_timeout_ms == 0 or
         (config.admission.requests_per_second != 0 and config.admission.burst == 0))
         return error.InvalidLimit;
+    if (config.log_fd) |fd| if (fd < 0) return error.InvalidLimit;
     if (config.admission.max_active) |limit| {
         if (limit == 0 or limit > config.max_connections) return error.InvalidLimit;
     }
@@ -165,6 +172,8 @@ pub fn parse(args: []const []const u8) Error!Config {
                 config.close_timeout_ms = number;
             } else if (std.mem.eql(u8, arg, "--max-body-bytes")) {
                 config.max_body_bytes = number;
+            } else if (std.mem.eql(u8, arg, "--max-chunk-framing-bytes")) {
+                config.max_chunk_framing_bytes = number;
             } else if (std.mem.eql(u8, arg, "--max-requests")) {
                 config.max_requests_per_connection = number;
             } else return error.InvalidOption;
@@ -180,6 +189,13 @@ test "resource budgets reject overflow and ring capacity violations" {
     try testing.expectError(error.InvalidLimit, (Config{ .max_connections = 8192 }).validate());
     try testing.expectError(error.InvalidLimit, (Config{ .application_bytes = 1 }).validate());
     try (Config{}).validate();
+}
+
+test "chunk framing configuration preserves a terminal size line budget" {
+    const testing = std.testing;
+    try testing.expectError(error.InvalidLimit, parse(&.{ "--max-chunk-framing-bytes", "2" }));
+    const config = try parse(&.{ "--max-chunk-framing-bytes", "3" });
+    try testing.expectEqual(@as(u64, 3), config.max_chunk_framing_bytes);
 }
 
 test "worker budgets multiply capacity and reject invalid worker counts" {

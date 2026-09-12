@@ -1,91 +1,75 @@
-//! HTTP-date parsing, including both obsolete wire formats required by RFC 9110.
+//! Strict HTTP-date grammar with UTC calendar conversion supplied by zeit.
 
 const std = @import("std");
-const epoch = std.time.epoch;
+const zeit = @import("zeit");
 const log = std.log.scoped(.http_date);
-
-const weekdays = [_][]const u8{
-    "Sun",
-    "Mon",
-    "Tue",
-    "Wed",
-    "Thu",
-    "Fri",
-    "Sat",
-};
-const long_weekdays = [_][]const u8{
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-};
-const months = [_][]const u8{
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-};
 
 /// Returns Unix seconds, or null for invalid syntax or calendar dates. Leap
 /// seconds map to the following Unix second. `now` resolves RFC 850 years;
 /// asserts it lies between 1970 and 9949, inclusive.
 pub fn parse(bytes: []const u8, now: u64) ?i64 {
-    std.debug.assert(now < (calendarDays(9950, 1, 1) orelse unreachable) * 86400);
+    std.debug.assert(now < (zeit.Time{ .year = 9950 }).instant().unixTimestamp());
     var year: u16 = undefined;
-    var month: u8 = undefined;
+    var month: zeit.Month = undefined;
     var day: u16 = undefined;
-    var weekday: usize = undefined;
-    var time: []const u8 = undefined;
+    var weekday: zeit.Weekday = undefined;
+    var time: zeit.Time = undefined;
     if (bytes.len == 29 and bytes[3] == ',') {
         if (!std.mem.eql(u8, bytes[3..5], ", ") or bytes[7] != ' ' or
             bytes[11] != ' ' or bytes[16] != ' ' or !std.mem.eql(u8, bytes[25..], " GMT")) return null;
-        weekday = lookup(&weekdays, bytes[0..3]) orelse return null;
+        weekday = parseWeekday(bytes[0..3], false) orelse return null;
         day = number(bytes[5..7]) orelse return null;
-        month = @intCast((lookup(&months, bytes[8..11]) orelse return null) + 1);
+        month = parseMonth(bytes[8..11]) orelse return null;
         year = number(bytes[12..16]) orelse return null;
-        time = bytes[17..25];
+        time = parseTime(bytes[17..25]) orelse return null;
     } else if (bytes.len == 24 and bytes[3] == ' ') {
         if (bytes[7] != ' ' or bytes[10] != ' ' or bytes[19] != ' ') return null;
-        weekday = lookup(&weekdays, bytes[0..3]) orelse return null;
-        month = @intCast((lookup(&months, bytes[4..7]) orelse return null) + 1);
+        weekday = parseWeekday(bytes[0..3], false) orelse return null;
+        month = parseMonth(bytes[4..7]) orelse return null;
         day = number(if (bytes[8] == ' ') bytes[9..10] else bytes[8..10]) orelse return null;
         year = number(bytes[20..24]) orelse return null;
-        time = bytes[11..19];
+        time = parseTime(bytes[11..19]) orelse return null;
     } else {
         const comma = std.mem.indexOfScalar(u8, bytes, ',') orelse return null;
-        weekday = lookup(&long_weekdays, bytes[0..comma]) orelse return null;
+        weekday = parseWeekday(bytes[0..comma], true) orelse return null;
         const rest = bytes[comma..];
         if (rest.len != 24 or rest[1] != ' ' or rest[4] != '-' or rest[8] != '-' or
             rest[11] != ' ' or !std.mem.eql(u8, rest[20..], " GMT")) return null;
         day = number(rest[2..4]) orelse return null;
-        month = @intCast((lookup(&months, rest[5..8]) orelse return null) + 1);
+        month = parseMonth(rest[5..8]) orelse return null;
         const short_year = number(rest[9..11]) orelse return null;
-        time = rest[12..20];
-        const current: epoch.EpochSeconds = .{ .secs = now };
-        const current_year = current.getEpochDay().calculateYearDay();
-        const current_month = current_year.calculateMonthDay();
-        const future_year = current_year.year + 50;
-        const future_day = @min(current_month.day_index + @as(u16, 1), epoch.getDaysInMonth(future_year, current_month.month));
-        const cutoff = (calendarDays(future_year, current_month.month.numeric(), future_day) orelse unreachable) * 86400 +
-            current.getDaySeconds().secs;
+        time = parseTime(rest[12..20]) orelse return null;
+        const current = zeit.instant(.{ .unix_timestamp = @intCast(now) }, &zeit.utc).time();
+        const future_year: u16 = @intCast(current.year + 50);
+        const future_day = @min(current.day, current.month.lastDay(future_year));
         year = future_year / 100 * 100 + short_year;
-        const candidate = (calendarDays(year, month, day) orelse return null) * 86400 + (parseTime(time) orelse return null);
-        if (candidate > cutoff) year -= 100;
+        // Compare civil components before calendar validation: 29-Feb-2100
+        // can denote valid 29-Feb-2000 after the RFC 850 century adjustment.
+        const candidate = [_]u16{
+            year,
+            @intFromEnum(month),
+            day,
+            time.hour,
+            time.minute,
+            time.second,
+        };
+        const cutoff = [_]u16{
+            future_year,
+            @intFromEnum(current.month),
+            future_day,
+            current.hour,
+            current.minute,
+            current.second,
+        };
+        if (std.mem.order(u16, &candidate, &cutoff) == .gt) year -= 100;
     }
-    const days = calendarDays(year, month, day) orelse return null;
-    if (@mod(days + 4, 7) != weekday) return null;
-    return days * 86400 + (parseTime(time) orelse return null);
+    if (year < 1601 or year > 9999 or day < 1 or day > month.lastDay(year)) return null;
+    time.year = year;
+    time.month = month;
+    time.day = @intCast(day);
+    const days = zeit.daysFromCivil(.{ .year = year, .month = month, .day = time.day });
+    if (zeit.weekdayFromDays(days) != weekday) return null;
+    return time.instant().unixTimestamp();
 }
 
 fn number(bytes: []const u8) ?u16 {
@@ -93,29 +77,27 @@ fn number(bytes: []const u8) ?u16 {
     return std.fmt.parseInt(u16, bytes, 10) catch null;
 }
 
-fn lookup(list: []const []const u8, bytes: []const u8) ?usize {
-    for (list, 0..) |name, index| if (std.mem.eql(u8, name, bytes)) return index;
+fn parseMonth(bytes: []const u8) ?zeit.Month {
+    inline for (std.meta.tags(zeit.Month)) |month| {
+        if (std.mem.eql(u8, month.shortName(), bytes)) return month;
+    }
     return null;
 }
 
-fn parseTime(bytes: []const u8) ?u32 {
+fn parseWeekday(bytes: []const u8, long: bool) ?zeit.Weekday {
+    inline for (std.meta.tags(zeit.Weekday)) |weekday| {
+        if (std.mem.eql(u8, if (long) weekday.name() else weekday.shortName(), bytes)) return weekday;
+    }
+    return null;
+}
+
+fn parseTime(bytes: []const u8) ?zeit.Time {
     if (bytes[2] != ':' or bytes[5] != ':') return null;
     const hour = number(bytes[0..2]) orelse return null;
     const minute = number(bytes[3..5]) orelse return null;
     const second = number(bytes[6..8]) orelse return null;
     if (hour > 23 or minute > 59 or second > 60) return null;
-    return @as(u32, hour) * 3600 + @as(u32, minute) * 60 + second;
-}
-
-fn calendarDays(year: u16, month: u8, day: u16) ?i64 {
-    if (year < 1601 or year > 9999 or month < 1 or month > 12 or day < 1 or
-        day > epoch.getDaysInMonth(year, @enumFromInt(month))) return null;
-    const before: i64 = year - 1;
-    var days = (before - 1969) * 365 + @divFloor(before, 4) - @divFloor(before, 100) +
-        @divFloor(before, 400) - 477;
-    var m: u8 = 1;
-    while (m < month) : (m += 1) days += epoch.getDaysInMonth(year, @enumFromInt(m));
-    return days + day - 1;
+    return .{ .hour = @intCast(hour), .minute = @intCast(minute), .second = @intCast(second) };
 }
 
 test "HTTP dates accept three formats and reject invalid calendar values" {
@@ -143,4 +125,18 @@ test "RFC 850 rolls future years into the preceding century" {
     try std.testing.expectEqual(@as(?i64, 315532800), parse("Tuesday, 01-Jan-80 00:00:00 GMT", 1789096284));
     // In 2040, that same suffix instead denotes 2080, whose weekday is Monday.
     try std.testing.expectEqual(@as(?i64, 3471292800), parse("Monday, 01-Jan-80 00:00:00 GMT", 2208988800));
+}
+
+test "RFC 850 selects the century before validating leap days" {
+    const testing = std.testing;
+    try testing.expectEqual(@as(?i64, 951782400), parse("Tuesday, 29-Feb-00 00:00:00 GMT", 2524608000));
+    try testing.expectEqual(@as(?i64, null), parse("Tuesday, 29-Feb-00 00:00:00 GMT", 2556144000));
+    try testing.expectEqual(@as(?i64, null), parse("Tuesday, 30-Feb-00 00:00:00 GMT", 2524608000));
+}
+
+test "RFC 850 fifty-year cutoff includes the time of day" {
+    const testing = std.testing;
+    const now = 2524608000;
+    try testing.expectEqual(@as(?i64, 4102444800), parse("Friday, 01-Jan-00 00:00:00 GMT", now));
+    try testing.expectEqual(@as(?i64, 946684801), parse("Saturday, 01-Jan-00 00:00:01 GMT", now));
 }

@@ -8,6 +8,7 @@ const Logger = @This();
 slots: []Slot,
 metrics: *Metrics,
 verbose: bool = false,
+enabled: bool = true,
 worker: u32 = 0,
 read_index: usize = 0,
 count: usize = 0,
@@ -51,6 +52,7 @@ pub fn init(logger: *Logger, slots: []Slot, metrics: *Metrics, verbose: bool) vo
 }
 
 pub fn emit(logger: *Logger, event: Event) void {
+    if (!logger.enabled) return;
     if (event.level == .debug and !logger.verbose) return;
     if (logger.count == logger.slots.len) {
         logger.metrics.add(.log_dropped_total, 1);

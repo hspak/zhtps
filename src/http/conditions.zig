@@ -151,3 +151,15 @@ test "preconditions use RFC ordering and ignore invalid or repeated dates" {
     request.headers = &.{.{ .name = "If-Modified-Since", .value = "invalid" }};
     try testing.expectEqual(@as(?u16, null), try evaluate(&request, selected, 0));
 }
+
+test "RFC 850 leap day precondition survives century rollover" {
+    const request: http.Request = .{
+        .method = "GET",
+        .headers = &.{.{ .name = "If-Unmodified-Since", .value = "Tuesday, 29-Feb-00 00:00:00 GMT" }},
+    };
+    try std.testing.expectEqual(@as(?u16, 412), try evaluate(
+        &request,
+        .{ .last_modified = 978307200 },
+        2524608000,
+    ));
+}

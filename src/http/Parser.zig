@@ -26,6 +26,7 @@ chunk_line: [max_chunk_line]u8 = undefined,
 chunk_line_len: usize = 0,
 remaining: u64 = 0,
 body_bytes: u64 = 0,
+chunk_framing_bytes: u64 = 0,
 
 pub const max_fields = 128;
 pub const max_chunk_line = 4096;
@@ -33,6 +34,8 @@ pub const max_chunk_line = 4096;
 pub const Limits = struct {
     max_target_bytes: usize = 8192,
     max_body_bytes: u64 = 64 * 1024 * 1024,
+    /// Cumulative size lines, extensions, and chunk delimiters, excluding trailers.
+    max_chunk_framing_bytes: u64 = 64 * 1024,
     max_header_count: usize = max_fields,
     max_trailer_count: usize = max_fields,
 };
@@ -58,6 +61,7 @@ pub const Error = Request.ParseError || EofError || error{
     BodyTooLarge,
     InvalidChunk,
     ChunkExtensionTooLarge,
+    ChunkFramingTooLarge,
     TrailersTooLarge,
     ForbiddenTrailer,
     TooManyTrailers,
@@ -179,6 +183,7 @@ pub fn feed(parser: *Parser, input: []const u8) Error!Step {
         },
         .chunk_size => {
             if (consumed == input.len) return .{ .consumed = consumed, .event = .need_input };
+            try parser.countChunkFramingByte();
             if (parser.chunk_line_len == parser.chunk_line.len) return error.ChunkExtensionTooLarge;
             const c = input[consumed];
             const len = parser.chunk_line_len;
@@ -196,6 +201,7 @@ pub fn feed(parser: *Parser, input: []const u8) Error!Step {
         },
         .chunk_cr, .chunk_lf => {
             if (consumed == input.len) return .{ .consumed = consumed, .event = .need_input };
+            try parser.countChunkFramingByte();
             const wanted: u8 = if (parser.phase == .chunk_cr) '\r' else '\n';
             if (input[consumed] != wanted) return error.InvalidChunk;
             consumed += 1;
@@ -246,7 +252,7 @@ pub fn status(err: Error) u16 {
     return switch (err) {
         error.HeadersTooLarge, error.TooManyHeaders, error.TrailersTooLarge, error.TooManyTrailers => 431,
         error.TargetTooLong => 414,
-        error.BodyTooLarge => 413,
+        error.BodyTooLarge, error.ChunkFramingTooLarge => 413,
         error.UnsupportedVersion => 505,
         error.UnsupportedTransferCoding => 501,
         error.ExpectationUnsupported => 417,
@@ -266,6 +272,12 @@ pub fn status(err: Error) u16 {
         error.UnexpectedEof,
         => 400,
     };
+}
+
+fn countChunkFramingByte(parser: *Parser) error{ChunkFramingTooLarge}!void {
+    if (parser.chunk_framing_bytes == parser.limits.max_chunk_framing_bytes)
+        return error.ChunkFramingTooLarge;
+    parser.chunk_framing_bytes += 1;
 }
 
 fn parseChunkSize(bytes: []const u8) Error!u64 {
@@ -310,9 +322,22 @@ fn forbiddenTrailer(name: []const u8, request: *const Request) bool {
         "expect",
         "authorization",
         "proxy-authorization",
+        "cookie",
+        "if-match",
+        "if-none-match",
+        "if-modified-since",
+        "if-unmodified-since",
+        "if-range",
+        "range",
+        "max-forwards",
+        "cache-control",
+        "pragma",
         "content-encoding",
         "content-type",
         "content-range",
+        "content-disposition",
+        "content-language",
+        "content-location",
     }) |forbidden| if (syntax.eql(name, forbidden)) return true;
     for (request.headers) |field| {
         if (!syntax.eql(field.name, "connection")) continue;
@@ -587,6 +612,44 @@ test "field bytes retain validation at vector boundaries" {
                 } else {
                     try testing.expectError(error.InvalidHeader, parser.feed(input));
                 }
+            }
+        }
+    }
+}
+
+test "chunk framing budget counts all overhead across fragments and resets per request" {
+    const testing = std.testing;
+    const prefix = "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n";
+    const wire = prefix ++ "1;x=v\r\na\r\n1\r\nb\r\n0\r\nDigest: ok\r\n\r\nNEXT";
+    for ([_]usize{ 1, 7, wire.len }) |fragment| {
+        for ([_]u64{ 16, 17 }) |limit| {
+            var head: [256]u8 = undefined;
+            var trailers: [64]u8 = undefined;
+            var parser: Parser = undefined;
+            parser.init(&head, &trailers, .{ .max_chunk_framing_bytes = limit });
+            var offset: usize = 0;
+            var body_len: usize = 0;
+            while (parser.phase != .complete) {
+                const end = @min(wire.len, offset + fragment);
+                const step = parser.feed(wire[offset..end]) catch |err| {
+                    try testing.expectEqual(@as(u64, 16), limit);
+                    try testing.expectEqual(error.ChunkFramingTooLarge, err);
+                    try testing.expectEqual(.invalid, parser.phase);
+                    break;
+                };
+                offset += step.consumed;
+                if (step.event == .body) body_len += step.event.body.len;
+                try testing.expect(offset < wire.len);
+            }
+            try testing.expectEqual(@as(usize, 2), body_len);
+            if (limit == 17) {
+                try testing.expectEqual(.complete, parser.phase);
+                try testing.expectEqual(wire.len - 4, offset);
+                parser.reset();
+                _ = try parser.feed(prefix);
+                try testing.expectEqual(.end, (try parser.feed("0\r\n\r\n")).event);
+            } else {
+                try testing.expectEqual(.invalid, parser.phase);
             }
         }
     }

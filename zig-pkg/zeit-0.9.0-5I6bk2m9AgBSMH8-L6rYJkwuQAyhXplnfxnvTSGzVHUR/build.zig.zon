@@ -1,0 +1,13 @@
+.{
+    .name = .zeit,
+    .fingerprint = 0x888df3e4939b8ee4,
+    .version = "0.9.0",
+    .dependencies = .{},
+    .paths = .{
+        "LICENSE",
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+    .minimum_zig_version = "0.16.0-dev.2533+355c62600",
+}
