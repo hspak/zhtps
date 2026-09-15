@@ -5,7 +5,6 @@ const zhtps = @import("zhtps");
 const options = @import("upload_options");
 const Crc32 = @import("Crc32.zig");
 const linux = zhtps.platform.linux;
-const log = std.log.scoped(.bench_upload);
 
 const body_limit = 8 * 1024 * 1024;
 var stopping: std.atomic.Value(bool) = .init(false);
@@ -17,7 +16,7 @@ fn signal(sig: linux.SIG) callconv(.c) void {
 }
 
 const api = struct {
-    const C = zhtps.Call(@This());
+    const C = zhtps.Call(api);
     pub const Services = struct {
         consumed: std.atomic.Value(u64) = .init(0),
         completed: std.atomic.Value(u64) = .init(0),
@@ -59,36 +58,12 @@ const api = struct {
             .handler = inspect,
             .lane = .control,
         }),
-        upload(
-            "/upload",
-            body_limit,
-            .default,
-        ),
-        upload(
-            "/held",
-            body_limit,
-            .default,
-        ),
-        upload(
-            "/invalid",
-            body_limit,
-            .default,
-        ),
-        upload(
-            "/small",
-            16,
-            .default,
-        ),
-        upload(
-            "/deadline",
-            body_limit,
-            .short,
-        ),
-        upload(
-            "/deadline-held",
-            body_limit,
-            .short,
-        ),
+        upload("/upload", body_limit, .default),
+        upload("/held", body_limit, .default),
+        upload("/invalid", body_limit, .default),
+        upload("/small", 16, .default),
+        upload("/deadline", body_limit, .short),
+        upload("/deadline-held", body_limit, .short),
         if (options.streaming) zhtps.endpoint(.{
             .method = .post,
             .path = "/denied",
@@ -150,30 +125,14 @@ const api = struct {
 
     fn consume(call: *C, bytes: []const u8) C.HandlerError!void {
         if (options.observe) {
-            if (std.mem.eql(
-                u8,
-                call.request.path,
-                "/invalid",
-            )) return error.InvalidInput;
-            if ((std.mem.eql(
-                u8,
-                call.request.path,
-                "/held",
-            ) or
-                std.mem.eql(
-                    u8,
-                    call.request.path,
-                    "/deadline-held",
-                )) and call.local.bytes == 0)
+            if (std.mem.eql(u8, call.request.path, "/invalid")) return error.InvalidInput;
+            if ((std.mem.eql(u8, call.request.path, "/held") or
+                std.mem.eql(u8, call.request.path, "/deadline-held")) and call.local.bytes == 0)
             {
                 _ = call.services.holding.fetchAdd(1, .release);
                 defer _ = call.services.holding.fetchSub(1, .release);
                 while (!gate.load(.acquire))
-                    std.Io.sleep(
-                        call.io,
-                        .fromMilliseconds(1),
-                        .awake,
-                    ) catch {};
+                    std.Io.sleep(call.io, .fromMilliseconds(1), .awake) catch {};
             }
         }
         call.local.checksum.update(bytes);
@@ -196,11 +155,7 @@ const api = struct {
     }
 
     pub fn release(call: *C) void {
-        if (options.observe and std.mem.eql(
-            u8,
-            call.request.method,
-            "POST",
-        ))
+        if (options.observe and std.mem.eql(u8, call.request.method, "POST"))
             _ = call.services.released.fetchAdd(1, .release);
     }
 };
@@ -221,19 +176,10 @@ pub fn main(init: std.process.Init) !void {
         .INT,
         .USR1,
     }) |sig|
-        _ = try zhtps.platform.check(linux.sigaction(
-            sig,
-            &action,
-            null,
-        ));
+        _ = try zhtps.platform.check(linux.sigaction(sig, &action, null));
     var services: api.Services = .{};
     var server: zhtps.Server(zhtps.Application(api)) = undefined;
-    try server.initApplication(
-        init.gpa,
-        init.io,
-        config,
-        &services,
-    );
+    try server.initApplication(init.gpa, init.io, config, &services);
     defer server.deinit();
     for (server.shared.workers) |*worker| worker.stop = &stopping;
     try server.serve();

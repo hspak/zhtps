@@ -1,7 +1,6 @@
 //! Worker-owned reuse of fixed-size buffers; allocation only occurs on cache misses.
 
 const std = @import("std");
-const log = std.log.scoped(.buffer_pool);
 const BufferPool = @This();
 
 size: usize = 0,

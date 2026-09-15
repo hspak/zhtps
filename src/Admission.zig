@@ -1,7 +1,6 @@
 //! Worker-local permits and token buckets for both useful work and rejection.
 
 const std = @import("std");
-const log = std.log.scoped(.admission);
 const Admission = @This();
 
 options: Options = .{},
@@ -27,11 +26,7 @@ pub const Decision = enum {
 const token_scale: u64 = 1_000_000_000;
 
 /// Starts with full admission and rejection buckets at the supplied monotonic time.
-pub fn init(
-    admission: *Admission,
-    options: Options,
-    now_ns: u64,
-) void {
+pub fn init(admission: *Admission, options: Options, now_ns: u64) void {
     admission.* = .{
         .options = options,
         .tokens = @as(u64, options.burst) * token_scale,
@@ -42,11 +37,7 @@ pub fn init(
 
 /// Never waits. Every admit/reject decision owns one corresponding permit,
 /// released when the response completes or its connection is abandoned.
-pub fn acquire(
-    admission: *Admission,
-    now_ns: u64,
-    draining: bool,
-) Decision {
+pub fn acquire(admission: *Admission, now_ns: u64, draining: bool) Decision {
     admission.refill(now_ns);
     if (!draining and admission.active < admission.options.max_active and
         (admission.options.requests_per_second == 0 or admission.tokens >= token_scale))
@@ -110,12 +101,7 @@ pub fn refill(admission: *Admission, now_ns: u64) void {
     );
 }
 
-fn refillBucket(
-    tokens: u64,
-    burst: u32,
-    rate: u32,
-    elapsed: u64,
-) u64 {
+fn refillBucket(tokens: u64, burst: u32, rate: u32, elapsed: u64) u64 {
     const capacity = @as(u64, burst) * token_scale;
     if (tokens >= capacity) return capacity;
     // A balance is at most maxInt(u32) * token_scale. Adding at most one

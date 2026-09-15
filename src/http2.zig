@@ -6,7 +6,6 @@ const http = @import("http.zig");
 const c = @cImport({
     @cInclude("nghttp2/nghttp2.h");
 });
-const log = std.log.scoped(.http2);
 
 pub const Error = std.mem.Allocator.Error || error{
     Protocol,
@@ -75,20 +74,10 @@ pub fn Session(comptime Handler: type) type {
             c.nghttp2_option_set_no_auto_window_update(options, 1);
             c.nghttp2_option_set_max_continuations(options, 8);
             c.nghttp2_option_set_max_outbound_ack(options, 128);
-            c.nghttp2_option_set_stream_reset_rate_limit(
-                options,
-                100,
-                10,
-            );
+            c.nghttp2_option_set_stream_reset_rate_limit(options, 100, 10);
             var memory = self.memory.callbacks();
             var handle: ?*c.nghttp2_session = null;
-            try check(c.nghttp2_session_server_new3(
-                &handle,
-                callbacks,
-                self,
-                options,
-                &memory,
-            ));
+            try check(c.nghttp2_session_server_new3(&handle, callbacks, self, options, &memory));
             errdefer c.nghttp2_session_del(handle);
             self.handle = handle.?;
             const settings = [_]c.nghttp2_settings_entry{
@@ -96,12 +85,7 @@ pub fn Session(comptime Handler: type) type {
                 .{ .settings_id = c.NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE, .value = limits.header_bytes },
                 .{ .settings_id = c.NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, .value = limits.stream_window },
             };
-            try check(c.nghttp2_submit_settings(
-                self.handle,
-                0,
-                &settings,
-                settings.len,
-            ));
+            try check(c.nghttp2_submit_settings(self.handle, 0, &settings, settings.len));
         }
 
         /// Caller releases remaining application streams separately on connection
@@ -115,11 +99,7 @@ pub fn Session(comptime Handler: type) type {
         /// Consumes plaintext, including the initial client preface. Negative
         /// engine outcomes are connection-fatal; never retry after an error.
         pub fn receive(self: *Self, bytes: []const u8) Error!usize {
-            const count = c.nghttp2_session_mem_recv2(
-                self.handle,
-                bytes.ptr,
-                bytes.len,
-            );
+            const count = c.nghttp2_session_mem_recv2(self.handle, bytes.ptr, bytes.len);
             if (count < 0) return self.callback_error orelse mapped(count);
             return @intCast(count);
         }
@@ -135,16 +115,8 @@ pub fn Session(comptime Handler: type) type {
 
         /// Credit body bytes only after the application consumes them, not merely
         /// after receiving them. Updates both connection and stream windows.
-        pub fn consume(
-            self: *Self,
-            id: i32,
-            count: usize,
-        ) Error!void {
-            try check(c.nghttp2_session_consume(
-                self.handle,
-                id,
-                count,
-            ));
+        pub fn consume(self: *Self, id: i32, count: usize) Error!void {
+            try check(c.nghttp2_session_consume(self.handle, id, count));
         }
 
         /// Separately credit bounded connection buffering and application
@@ -154,16 +126,8 @@ pub fn Session(comptime Handler: type) type {
         }
 
         /// Credits stream buffering only after the application consumes count bytes.
-        pub fn consumeStream(
-            self: *Self,
-            id: i32,
-            count: usize,
-        ) Error!void {
-            try check(c.nghttp2_session_consume_stream(
-                self.handle,
-                id,
-                count,
-            ));
+        pub fn consumeStream(self: *Self, id: i32, count: usize) Error!void {
+            try check(c.nghttp2_session_consume_stream(self.handle, id, count));
         }
 
         /// Reports whether the engine still accepts input, including protocol shutdown traffic.
@@ -174,15 +138,7 @@ pub fn Session(comptime Handler: type) type {
         /// Queues a 100 Continue header block without ending the stream.
         pub fn inform(self: *Self, id: i32) Error!void {
             var status = field(":status", "100");
-            try check(c.nghttp2_submit_headers(
-                self.handle,
-                0,
-                id,
-                null,
-                &status,
-                1,
-                null,
-            ));
+            try check(c.nghttp2_submit_headers(self.handle, 0, id, null, &status, 1, null));
         }
 
         /// Copies final response headers into nghttp2. With a body, produce is
@@ -197,11 +153,7 @@ pub fn Session(comptime Handler: type) type {
             if (status < 200 or status > 599) return error.InvalidOperation;
             if (headers.len > 63) return error.HeaderListTooLarge;
             var code: [3]u8 = undefined;
-            _ = std.fmt.bufPrint(
-                &code,
-                "{d}",
-                .{status},
-            ) catch unreachable;
+            _ = std.fmt.bufPrint(&code, "{d}", .{status}) catch unreachable;
             var fields: [64]c.nghttp2_nv = undefined;
             fields[0] = field(":status", &code);
             for (headers, 1..) |entry, index| {
@@ -229,22 +181,12 @@ pub fn Session(comptime Handler: type) type {
 
         /// Queues cancellation of one stream; other streams remain usable.
         pub fn reset(self: *Self, id: i32) Error!void {
-            try check(c.nghttp2_submit_rst_stream(
-                self.handle,
-                0,
-                id,
-                c.NGHTTP2_CANCEL,
-            ));
+            try check(c.nghttp2_submit_rst_stream(self.handle, 0, id, c.NGHTTP2_CANCEL));
         }
 
         /// Stop an unread request after its final response has been serialized.
         pub fn finishInput(self: *Self, id: i32) Error!void {
-            try check(c.nghttp2_submit_rst_stream(
-                self.handle,
-                0,
-                id,
-                c.NGHTTP2_NO_ERROR,
-            ));
+            try check(c.nghttp2_submit_rst_stream(self.handle, 0, id, c.NGHTTP2_NO_ERROR));
         }
 
         /// Refuses streams beyond last_id while allowing already accepted streams
@@ -264,23 +206,14 @@ pub fn Session(comptime Handler: type) type {
             return @ptrCast(@alignCast(pointer.?));
         }
 
-        fn failed(
-            self: *Self,
-            id: i32,
-            err: Error,
-        ) c_int {
+        fn failed(self: *Self, id: i32, err: Error) c_int {
             @branchHint(.cold);
             if (err != error.OutOfMemory) {
                 const code: u32 = if (err == error.RefusedStream)
                     c.NGHTTP2_REFUSED_STREAM
                 else
                     c.NGHTTP2_PROTOCOL_ERROR;
-                if (c.nghttp2_submit_rst_stream(
-                    self.handle,
-                    0,
-                    id,
-                    code,
-                ) == 0)
+                if (c.nghttp2_submit_rst_stream(self.handle, 0, id, code) == 0)
                     return c.NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
             }
             self.callback_error = error.OutOfMemory;
@@ -433,13 +366,7 @@ pub fn Session(comptime Handler: type) type {
             pointer: ?*anyopaque,
         ) callconv(.c) isize {
             const self = owner(pointer);
-            const count = (self.handler.produce(
-                id,
-                bytes[0..len],
-            ) catch |err| return self.failed(
-                id,
-                err,
-            )) orelse
+            const count = (self.handler.produce(id, bytes[0..len]) catch |err| return self.failed(id, err)) orelse
                 return c.NGHTTP2_ERR_DEFERRED;
             std.debug.assert(count <= len);
             if (count == 0 or (if (comptime @hasDecl(
@@ -510,17 +437,9 @@ const Memory = struct {
 
     fn allocate(size: usize, pointer: ?*anyopaque) callconv(.c) ?*anyopaque {
         const self = owner(pointer);
-        const len = std.math.add(
-            usize,
-            size,
-            @sizeOf(Prefix),
-        ) catch return null;
+        const len = std.math.add(usize, size, @sizeOf(Prefix)) catch return null;
         if (len > self.limit - self.used) return null;
-        const bytes = self.gpa.alignedAlloc(
-            u8,
-            .@"16",
-            len,
-        ) catch return null;
+        const bytes = self.gpa.alignedAlloc(u8, .@"16", len) catch return null;
         const prefix: *Prefix = @ptrCast(bytes.ptr);
         prefix.* = .{ .len = len };
         self.used += len;
@@ -534,26 +453,14 @@ const Memory = struct {
         self.gpa.free(bytes);
     }
 
-    fn zeroed(
-        count: usize,
-        size: usize,
-        user: ?*anyopaque,
-    ) callconv(.c) ?*anyopaque {
-        const len = std.math.mul(
-            usize,
-            count,
-            size,
-        ) catch return null;
+    fn zeroed(count: usize, size: usize, user: ?*anyopaque) callconv(.c) ?*anyopaque {
+        const len = std.math.mul(usize, count, size) catch return null;
         const pointer = allocate(len, user) orelse return null;
         @memset(@as([*]u8, @ptrCast(pointer))[0..len], 0);
         return pointer;
     }
 
-    fn resize(
-        pointer: ?*anyopaque,
-        size: usize,
-        user: ?*anyopaque,
-    ) callconv(.c) ?*anyopaque {
+    fn resize(pointer: ?*anyopaque, size: usize, user: ?*anyopaque) callconv(.c) ?*anyopaque {
         const old = allocation(pointer orelse return allocate(size, user));
         // Charge peak allocation, not just the final size, while copying.
         const next = allocate(size, user) orelse return null;
@@ -584,26 +491,13 @@ const Probe = struct {
         return &self.streams[@intCast(@divTrunc(id, 2))];
     }
 
-    pub fn begin(
-        self: *Probe,
-        id: i32,
-        trailers: bool,
-    ) Error!void {
+    pub fn begin(self: *Probe, id: i32, trailers: bool) Error!void {
         if (id <= 0 or id >= 16) return error.RefusedStream;
         if (!trailers) self.stream(id).opened = true;
     }
 
-    pub fn header(
-        self: *Probe,
-        id: i32,
-        name: []const u8,
-        value: []const u8,
-    ) Error!void {
-        if (std.mem.eql(
-            u8,
-            name,
-            ":path",
-        )) {
+    pub fn header(self: *Probe, id: i32, name: []const u8, value: []const u8) Error!void {
+        if (std.mem.eql(u8, name, ":path")) {
             const target = self.stream(id);
             if (value.len > target.path.len) return error.HeaderListTooLarge;
             @memcpy(target.path[0..value.len], value);
@@ -611,19 +505,11 @@ const Probe = struct {
         }
     }
 
-    pub fn head(
-        self: *Probe,
-        id: i32,
-        _: bool,
-    ) Error!void {
+    pub fn head(self: *Probe, id: i32, _: bool) Error!void {
         self.stream(id).head_ready = true;
     }
 
-    pub fn body(
-        self: *Probe,
-        id: i32,
-        bytes: []const u8,
-    ) Error!void {
+    pub fn body(self: *Probe, id: i32, bytes: []const u8) Error!void {
         if (self.reject_body) return error.RefusedStream;
         self.stream(id).body_bytes += bytes.len;
     }
@@ -632,19 +518,11 @@ const Probe = struct {
         self.stream(id).ended = true;
     }
 
-    pub fn closed(
-        self: *Probe,
-        id: i32,
-        code: u32,
-    ) void {
+    pub fn closed(self: *Probe, id: i32, code: u32) void {
         if (id > 0 and id < 16) self.stream(id).close_code = code;
     }
 
-    pub fn produce(
-        self: *Probe,
-        id: i32,
-        destination: []u8,
-    ) Error!?usize {
+    pub fn produce(self: *Probe, id: i32, destination: []u8) Error!?usize {
         const target = self.stream(id);
         if (!target.ready) return null;
         const count = @min(destination.len, target.response.len);
@@ -656,28 +534,12 @@ const Probe = struct {
 
 const test_headers = "\x82\x87\x84\x01\x09localhost";
 
-fn inputFrame(
-    session: *Session(Probe),
-    kind: u8,
-    flags: u8,
-    id: u32,
-    payload: []const u8,
-) !void {
+fn inputFrame(session: *Session(Probe), kind: u8, flags: u8, id: u32, payload: []const u8) !void {
     var header: [9]u8 = undefined;
-    std.mem.writeInt(
-        u24,
-        header[0..3],
-        @intCast(payload.len),
-        .big,
-    );
+    std.mem.writeInt(u24, header[0..3], @intCast(payload.len), .big);
     header[3] = kind;
     header[4] = flags;
-    std.mem.writeInt(
-        u32,
-        header[5..9],
-        id,
-        .big,
-    );
+    std.mem.writeInt(u32, header[5..9], id, .big);
     // Split framing and HPACK at every possible byte boundary.
     for (&header) |*byte| try std.testing.expectEqual(@as(usize, 1), try session.receive(byte[0..1]));
     for (payload) |*byte| try std.testing.expectEqual(@as(usize, 1), try session.receive(byte[0..1]));
@@ -686,49 +548,22 @@ fn inputFrame(
 fn preface(session: *Session(Probe)) !void {
     const bytes = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     try std.testing.expectEqual(bytes.len, try session.receive(bytes));
-    try inputFrame(
-        session,
-        c.NGHTTP2_SETTINGS,
-        0,
-        0,
-        "",
-    );
+    try inputFrame(session, c.NGHTTP2_SETTINGS, 0, 0, "");
 }
 
 test "http2 multiplexes responses without waiting for an earlier stream" {
     var handler: Probe = .{};
     var session: Session(Probe) = undefined;
-    try session.init(
-        std.testing.allocator,
-        &handler,
-        .{},
-    );
+    try session.init(std.testing.allocator, &handler, .{});
     defer session.deinit();
     try preface(&session);
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        5,
-        1,
-        test_headers,
-    );
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        5,
-        3,
-        test_headers,
-    );
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 5, 1, test_headers);
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 5, 3, test_headers);
     for ([_]i32{ 1, 3 }) |id| {
         const stream = handler.stream(id);
         try std.testing.expect(stream.head_ready and stream.ended);
         try std.testing.expectEqualStrings("/", stream.path[0..stream.path_len]);
-        try session.respond(
-            id,
-            200,
-            &.{},
-            true,
-        );
+        try session.respond(id, 200, &.{}, true);
     }
     handler.stream(3).ready = true;
     handler.stream(3).response = "second";
@@ -737,11 +572,7 @@ test "http2 multiplexes responses without waiting for an earlier stream" {
         const bytes = try session.output();
         if (bytes.len == 0) break;
         if (bytes[3] == c.NGHTTP2_DATA) {
-            try std.testing.expectEqual(@as(u32, 3), std.mem.readInt(
-                u32,
-                bytes[5..9],
-                .big,
-            ));
+            try std.testing.expectEqual(@as(u32, 3), std.mem.readInt(u32, bytes[5..9], .big));
             if (bytes.len > 9) try std.testing.expectEqualStrings("second", bytes[9..]);
             body_bytes += bytes.len - 9;
         }
@@ -757,11 +588,7 @@ test "http2 multiplexes responses without waiting for an earlier stream" {
         const bytes = try session.output();
         if (bytes.len == 0) break;
         if (bytes[3] == c.NGHTTP2_DATA) {
-            try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(
-                u32,
-                bytes[5..9],
-                .big,
-            ));
+            try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, bytes[5..9], .big));
             if (bytes.len > 9) try std.testing.expectEqualStrings("first", bytes[9..]);
             body_bytes += bytes.len - 9;
         }
@@ -773,74 +600,27 @@ test "http2 multiplexes responses without waiting for an earlier stream" {
 test "http2 credits input only after consumption and resets one stream" {
     var handler: Probe = .{};
     var session: Session(Probe) = undefined;
-    try session.init(
-        std.testing.allocator,
-        &handler,
-        .{ .stream_window = 8 },
-    );
+    try session.init(std.testing.allocator, &handler, .{ .stream_window = 8 });
     defer session.deinit();
     try preface(&session);
     while ((try session.output()).len != 0) {}
-    try inputFrame(
-        &session,
-        c.NGHTTP2_SETTINGS,
-        1,
-        0,
-        "",
-    );
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        4,
-        1,
-        test_headers,
-    );
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        5,
-        3,
-        test_headers,
-    );
-    try inputFrame(
-        &session,
-        c.NGHTTP2_DATA,
-        0,
-        1,
-        "abcdefgh",
-    );
+    try inputFrame(&session, c.NGHTTP2_SETTINGS, 1, 0, "");
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 4, 1, test_headers);
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 5, 3, test_headers);
+    try inputFrame(&session, c.NGHTTP2_DATA, 0, 1, "abcdefgh");
     try std.testing.expectEqual(@as(usize, 8), handler.stream(1).body_bytes);
     try std.testing.expect(!handler.stream(1).ended);
     try std.testing.expectEqual(@as(usize, 0), (try session.output()).len);
     try session.consume(1, 8);
     const update = try session.output();
     try std.testing.expectEqual(@as(u8, c.NGHTTP2_WINDOW_UPDATE), update[3]);
-    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(
-        u32,
-        update[5..9],
-        .big,
-    ));
-    try std.testing.expectEqual(@as(u32, 8), std.mem.readInt(
-        u32,
-        update[9..13],
-        .big,
-    ));
-    try inputFrame(
-        &session,
-        c.NGHTTP2_DATA,
-        1,
-        1,
-        "xyz",
-    );
+    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, update[5..9], .big));
+    try std.testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, update[9..13], .big));
+    try inputFrame(&session, c.NGHTTP2_DATA, 1, 1, "xyz");
     try std.testing.expectEqual(@as(usize, 11), handler.stream(1).body_bytes);
     try std.testing.expect(handler.stream(1).ended);
     try session.reset(1);
-    try session.respond(
-        3,
-        204,
-        &.{},
-        false,
-    );
+    try session.respond(3, 204, &.{}, false);
     while ((try session.output()).len != 0) {}
     try std.testing.expectEqual(@as(?u32, c.NGHTTP2_CANCEL), handler.stream(1).close_code);
     try std.testing.expectEqual(@as(?u32, 0), handler.stream(3).close_code);
@@ -855,20 +635,10 @@ test "http2 bounds decoded headers and session allocations" {
         .{ .session_bytes = 1 },
     ));
     try std.testing.expectEqual(@as(usize, 0), session.memory.used);
-    try session.init(
-        std.testing.allocator,
-        &handler,
-        .{ .header_bytes = 100 },
-    );
+    try session.init(std.testing.allocator, &handler, .{ .header_bytes = 100 });
     defer session.deinit();
     try preface(&session);
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        5,
-        1,
-        test_headers,
-    );
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 5, 1, test_headers);
     while ((try session.output()).len != 0) {}
     try std.testing.expect(!handler.stream(1).ended);
     try std.testing.expectEqual(@as(?u32, c.NGHTTP2_PROTOCOL_ERROR), handler.stream(1).close_code);
@@ -879,60 +649,25 @@ test "http2 initialization unwinds every allocator failure" {
         fn run(gpa: std.mem.Allocator) !void {
             var handler: Probe = .{};
             var session: Session(Probe) = undefined;
-            try session.init(
-                gpa,
-                &handler,
-                .{},
-            );
+            try session.init(gpa, &handler, .{});
             defer session.deinit();
             try preface(&session);
-            try inputFrame(
-                &session,
-                c.NGHTTP2_HEADERS,
-                5,
-                1,
-                test_headers,
-            );
-            try session.respond(
-                1,
-                204,
-                &.{},
-                false,
-            );
+            try inputFrame(&session, c.NGHTTP2_HEADERS, 5, 1, test_headers);
+            try session.respond(1, 204, &.{}, false);
             while ((try session.output()).len != 0) {}
         }
     };
-    try std.testing.checkAllAllocationFailures(
-        std.testing.allocator,
-        allocation_test.run,
-        .{},
-    );
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, allocation_test.run, .{});
 }
 
 test "http2 refuses excess streams before settings acknowledgement" {
     var handler: Probe = .{};
     var session: Session(Probe) = undefined;
-    try session.init(
-        std.testing.allocator,
-        &handler,
-        .{ .streams = 1 },
-    );
+    try session.init(std.testing.allocator, &handler, .{ .streams = 1 });
     defer session.deinit();
     try preface(&session);
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        5,
-        1,
-        test_headers,
-    );
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        5,
-        3,
-        test_headers,
-    );
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 5, 1, test_headers);
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 5, 3, test_headers);
     try std.testing.expect(handler.stream(1).ended);
     try std.testing.expect(!handler.stream(3).opened);
     var refused = false;
@@ -940,11 +675,7 @@ test "http2 refuses excess streams before settings acknowledgement" {
         const bytes = try session.output();
         if (bytes.len == 0) break;
         if (bytes[3] == c.NGHTTP2_RST_STREAM) {
-            try std.testing.expectEqual(@as(u32, 3), std.mem.readInt(
-                u32,
-                bytes[5..9],
-                .big,
-            ));
+            try std.testing.expectEqual(@as(u32, 3), std.mem.readInt(u32, bytes[5..9], .big));
             try std.testing.expectEqual(@as(u32, c.NGHTTP2_REFUSED_STREAM), std.mem.readInt(
                 u32,
                 bytes[9..13],
@@ -957,17 +688,8 @@ test "http2 refuses excess streams before settings acknowledgement" {
     try session.shutdown(1);
     const goaway = try session.output();
     try std.testing.expectEqual(@as(u8, c.NGHTTP2_GOAWAY), goaway[3]);
-    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(
-        u32,
-        goaway[9..13],
-        .big,
-    ));
-    try session.respond(
-        1,
-        204,
-        &.{},
-        false,
-    );
+    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, goaway[9..13], .big));
+    try session.respond(1, 204, &.{}, false);
     while ((try session.output()).len != 0) {}
     try std.testing.expectEqual(@as(?u32, 0), handler.stream(1).close_code);
 }
@@ -975,58 +697,25 @@ test "http2 refuses excess streams before settings acknowledgement" {
 test "http2 response waits for peer window credit" {
     var handler: Probe = .{};
     var session: Session(Probe) = undefined;
-    try session.init(
-        std.testing.allocator,
-        &handler,
-        .{},
-    );
+    try session.init(std.testing.allocator, &handler, .{});
     defer session.deinit();
     try preface(&session);
-    try inputFrame(
-        &session,
-        c.NGHTTP2_SETTINGS,
-        0,
-        0,
-        "\x00\x04\x00\x00\x00\x00",
-    );
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        5,
-        1,
-        test_headers,
-    );
+    try inputFrame(&session, c.NGHTTP2_SETTINGS, 0, 0, "\x00\x04\x00\x00\x00\x00");
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 5, 1, test_headers);
     handler.stream(1).ready = true;
     handler.stream(1).response = "abcdef";
-    try session.respond(
-        1,
-        200,
-        &.{},
-        true,
-    );
+    try session.respond(1, 200, &.{}, true);
     while (true) {
         const bytes = try session.output();
         if (bytes.len == 0) break;
         try std.testing.expect(bytes[3] != c.NGHTTP2_DATA);
     }
-    try inputFrame(
-        &session,
-        c.NGHTTP2_WINDOW_UPDATE,
-        0,
-        1,
-        "\x00\x00\x00\x03",
-    );
+    try inputFrame(&session, c.NGHTTP2_WINDOW_UPDATE, 0, 1, "\x00\x00\x00\x03");
     const first = try session.output();
     try std.testing.expectEqual(@as(u8, c.NGHTTP2_DATA), first[3]);
     try std.testing.expectEqualStrings("abc", first[9..]);
     try std.testing.expectEqual(@as(usize, 0), (try session.output()).len);
-    try inputFrame(
-        &session,
-        c.NGHTTP2_WINDOW_UPDATE,
-        0,
-        1,
-        "\x00\x00\x00\x04",
-    );
+    try inputFrame(&session, c.NGHTTP2_WINDOW_UPDATE, 0, 1, "\x00\x00\x00\x04");
     const second = try session.output();
     try std.testing.expectEqualStrings("def", second[9..]);
     while ((try session.output()).len != 0) {}
@@ -1036,27 +725,11 @@ test "http2 response waits for peer window credit" {
 test "http2 body rejection never dispatches request completion" {
     var handler: Probe = .{ .reject_body = true };
     var session: Session(Probe) = undefined;
-    try session.init(
-        std.testing.allocator,
-        &handler,
-        .{},
-    );
+    try session.init(std.testing.allocator, &handler, .{});
     defer session.deinit();
     try preface(&session);
-    try inputFrame(
-        &session,
-        c.NGHTTP2_HEADERS,
-        4,
-        1,
-        test_headers,
-    );
-    try inputFrame(
-        &session,
-        c.NGHTTP2_DATA,
-        1,
-        1,
-        "rejected",
-    );
+    try inputFrame(&session, c.NGHTTP2_HEADERS, 4, 1, test_headers);
+    try inputFrame(&session, c.NGHTTP2_DATA, 1, 1, "rejected");
     while ((try session.output()).len != 0) {}
     try std.testing.expect(!handler.stream(1).ended);
     try std.testing.expectEqual(@as(?u32, c.NGHTTP2_REFUSED_STREAM), handler.stream(1).close_code);

@@ -5,7 +5,6 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const log = std.log.scoped(.bench_crc32);
 const Crc32 = @This();
 
 crc: u32 = 0xffffffff,
@@ -34,11 +33,7 @@ pub fn update(self: *Crc32, bytes: []const u8) void {
     }
     if (comptime has_hardware) {
         const length = bytes.len & ~@as(usize, 15);
-        self.crc = fold(
-            self.crc,
-            bytes[0..length],
-            selected,
-        );
+        self.crc = fold(self.crc, bytes[0..length], selected);
         self.updatePortable(bytes[length..]);
     } else unreachable;
 }
@@ -87,11 +82,7 @@ fn cpuid(leaf: u32) u32 {
         });
 }
 
-inline fn multiply(
-    left: V,
-    right: V,
-    comptime selector: u8,
-) V {
+inline fn multiply(left: V, right: V, comptime selector: u8) V {
     return asm (std.fmt.comptimePrint("pclmulqdq ${d}, %[right], %[result]", .{selector})
         : [result] "=x" (-> V),
         : [left] "0" (left),
@@ -99,11 +90,7 @@ inline fn multiply(
     );
 }
 
-inline fn multiplyWide(
-    left: Wide,
-    right: Wide,
-    comptime selector: u8,
-) Wide {
+inline fn multiplyWide(left: Wide, right: Wide, comptime selector: u8) Wide {
     return asm (std.fmt.comptimePrint("vpclmulqdq ${d}, %[right], %[left], %[result]", .{selector})
         : [result] "=v" (-> Wide),
         : [left] "v" (left),
@@ -115,27 +102,11 @@ inline fn load(comptime T: type, bytes: []const u8) T {
     return @as(*align(1) const T, @ptrCast(bytes.ptr)).*;
 }
 
-inline fn combine(
-    left: V,
-    right: V,
-    factor: V,
-) V {
-    return multiply(
-        left,
-        factor,
-        0,
-    ) ^ multiply(
-        left,
-        factor,
-        0x11,
-    ) ^ right;
+inline fn combine(left: V, right: V, factor: V) V {
+    return multiply(left, factor, 0) ^ multiply(left, factor, 0x11) ^ right;
 }
 
-fn fold(
-    initial: u32,
-    bytes: []const u8,
-    selected: Mode,
-) u32 {
+fn fold(initial: u32, bytes: []const u8, selected: Mode) u32 {
     std.debug.assert(bytes.len >= 64 and bytes.len % 16 == 0);
     var lanes: [4]V = undefined;
     var offset: usize = 64;
@@ -163,16 +134,8 @@ fn fold(
                 0,
             });
             while (offset + 64 <= bytes.len) : (offset += 64) {
-                accumulator = multiplyWide(
-                    accumulator,
-                    factor,
-                    0,
-                ) ^
-                    multiplyWide(
-                        accumulator,
-                        factor,
-                        0x11,
-                    ) ^ load(Wide, bytes[offset..]);
+                accumulator = multiplyWide(accumulator, factor, 0) ^
+                    multiplyWide(accumulator, factor, 0x11) ^ load(Wide, bytes[offset..]);
             }
             lanes = @bitCast(accumulator);
             used_wide = true;
@@ -191,30 +154,13 @@ fn fold(
         }
     }
     var accumulator = lanes[0];
-    inline for (1..4) |index| accumulator = combine(
-        accumulator,
-        lanes[index],
-        fold_16,
-    );
+    inline for (1..4) |index| accumulator = combine(accumulator, lanes[index], fold_16);
     while (offset < bytes.len) : (offset += 16)
-        accumulator = combine(
-            accumulator,
-            load(V, bytes[offset..]),
-            fold_16,
-        );
+        accumulator = combine(accumulator, load(V, bytes[offset..]), fold_16);
 
     const zero: V = @splat(0);
-    accumulator = multiply(
-        accumulator,
-        fold_16,
-        0x10,
-    ) ^
-        @shuffle(
-            u64,
-            accumulator,
-            zero,
-            @Vector(2, i32){ 1, -1 },
-        );
+    accumulator = multiply(accumulator, fold_16, 0x10) ^
+        @shuffle(u64, accumulator, zero, @Vector(2, i32){ 1, -1 });
     const Words = @Vector(4, u32);
     const shifted: V = @bitCast(@shuffle(
         u32,
@@ -228,23 +174,11 @@ fn fold(
         },
     ));
     const mask: V = @splat(0xffffffff);
-    accumulator = multiply(
-        accumulator & mask,
-        .{ 0x163cd6124, 0 },
-        0,
-    ) ^ shifted;
+    accumulator = multiply(accumulator & mask, .{ 0x163cd6124, 0 }, 0) ^ shifted;
     const unreduced = accumulator;
     const polynomial: V = .{ 0x1db710641, 0x1f7011641 };
-    accumulator = multiply(
-        accumulator & mask,
-        polynomial,
-        0x10,
-    );
-    accumulator = multiply(
-        accumulator & mask,
-        polynomial,
-        0,
-    ) ^ unreduced;
+    accumulator = multiply(accumulator & mask, polynomial, 0x10);
+    accumulator = multiply(accumulator & mask, polynomial, 0) ^ unreduced;
     return @as(@Vector(4, u32), @bitCast(accumulator))[1];
 }
 
@@ -279,11 +213,7 @@ test "IEEE CRC32 matches known vectors and unaligned folding boundaries" {
             if (comptime has_hardware) {
                 if (available() != .portable) {
                     var checksum: Crc32 = .{
-                        .crc = fold(
-                            0xffffffff,
-                            bytes[0 .. length & ~@as(usize, 15)],
-                            .pclmul,
-                        ),
+                        .crc = fold(0xffffffff, bytes[0 .. length & ~@as(usize, 15)], .pclmul),
                     };
                     checksum.updatePortable(bytes[length & ~@as(usize, 15) ..]);
                     try testing.expectEqual(expected, checksum.final());

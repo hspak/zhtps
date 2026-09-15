@@ -2,8 +2,8 @@
 
 const std = @import("std");
 const linux = std.os.linux;
+pub const CpuSet = std.StaticBitSet(1024);
 const platform = @import("../platform.zig");
-const log = std.log.scoped(.config_resources);
 const Resources = @This();
 
 report: Report = .{},
@@ -12,7 +12,6 @@ cores: CpuSet = .initEmpty(),
 placement: [256]u16 = undefined,
 placement_count: usize = 0,
 
-pub const CpuSet = std.StaticBitSet(1024);
 pub const Error = std.mem.Allocator.Error || platform.Error || error{
     ResourceDetectionUnavailable,
     InvalidResourceFile,

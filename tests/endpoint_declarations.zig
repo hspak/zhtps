@@ -1,12 +1,10 @@
 //! Compile-failure specifications, run by zig build test-endpoint-declarations.
 
-const std = @import("std");
 const zhtps = @import("zhtps");
 const scenario = @import("scenario").index;
-const log = std.log.scoped(.endpoint_declarations);
 
 const api = struct {
-    const C = zhtps.Call(@This());
+    const C = zhtps.Call(api);
     fn respond(call: *C) zhtps.EndpointError!zhtps.http.Response {
         if (scenario == 15) return call.json(.no_content, .{});
         return call.text(.ok, "ok");
@@ -65,38 +63,14 @@ const api = struct {
         11 => .{zhtps.get("/a/../b", respond)},
         12 => .{zhtps.group(.{ .prefix = "/:tenant", .routes = .{zhtps.get("/", respond)} })},
         13 => .{ zhtps.get("/:id", respond), zhtps.get("/:name", respond) },
-        20 => .{zhtps.staticFiles(
-            @This(),
-            "/",
-            .{ .root = "public", .cache_contol = "no-cache" },
-        )},
+        20 => .{zhtps.staticFiles(api, "/", .{ .root = "public", .cache_contol = "no-cache" })},
         21 => .{
-            zhtps.staticFiles(
-                @This(),
-                "/",
-                .{ .root = "public" },
-            ),
-            zhtps.staticFiles(
-                @This(),
-                "/",
-                .{ .root = "other" },
-            ),
+            zhtps.staticFiles(api, "/", .{ .root = "public" }),
+            zhtps.staticFiles(api, "/", .{ .root = "other" }),
         },
-        22 => .{zhtps.staticFiles(
-            @This(),
-            "/assets/",
-            .{ .root = "public" },
-        )},
-        23 => .{zhtps.staticFiles(
-            @This(),
-            "/",
-            .{ .root = "public", .index_file = "../secret" },
-        )},
-        24 => .{zhtps.staticFiles(
-            @This(),
-            "/",
-            .{ .root = "public", .cache_control = "bad\r\n" },
-        )},
+        22 => .{zhtps.staticFiles(api, "/assets/", .{ .root = "public" })},
+        23 => .{zhtps.staticFiles(api, "/", .{ .root = "public", .index_file = "../secret" })},
+        24 => .{zhtps.staticFiles(api, "/", .{ .root = "public", .cache_control = "bad\r\n" })},
         14 => .{zhtps.group(.{ .prefix = "/", .routes = .{} })},
         16 => .{zhtps.get("/a?b", respond)},
         18 => .{zhtps.endpoint(.{

@@ -1,7 +1,6 @@
 //! Build the pinned libnghttp2 sources for zhtps's Linux targets.
 
 const std = @import("std");
-const log = std.log.scoped(.build_nghttp2);
 
 pub const Options = struct {
     target: std.Build.ResolvedTarget,

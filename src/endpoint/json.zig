@@ -3,7 +3,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
-const log = std.log.scoped(.endpoint_json);
 
 // Stay below std.json.Stringify's fixed 256-level nesting stack.
 pub const max_depth = 128;
@@ -21,11 +20,7 @@ pub fn checkDepth(bytes: []const u8) DepthError!void {
 /// unspecified; no partially serialized response should be sent.
 pub fn write(destination: []u8, value: anytype) WriteError![]const u8 {
     var output: Output = .{ .destination = destination };
-    std.json.Stringify.value(
-        value,
-        .{},
-        &output.writer,
-    ) catch
+    std.json.Stringify.value(value, .{}, &output.writer) catch
         return output.failure orelse error.OutOfMemory;
     return destination[0..output.used];
 }
@@ -67,11 +62,7 @@ const Output = struct {
     used: usize = 0,
     nesting: Nesting = .{},
     failure: ?WriteError = null,
-    fn drain(
-        writer: *Writer,
-        slices: []const []const u8,
-        splat: usize,
-    ) Writer.Error!usize {
+    fn drain(writer: *Writer, slices: []const []const u8, splat: usize) Writer.Error!usize {
         const output: *Output = @fieldParentPtr("writer", writer);
         const start = output.used;
         for (slices[0 .. slices.len - 1]) |bytes| try output.append(bytes);
@@ -131,11 +122,7 @@ test "JSON output bounds recursive values and preserves scalar formatting" {
     };
     var expected: [256]u8 = undefined;
     var writer: Writer = .fixed(&expected);
-    try std.json.Stringify.value(
-        values,
-        .{},
-        &writer,
-    );
+    try std.json.Stringify.value(values, .{}, &writer);
     try std.testing.expectEqualStrings(writer.buffered(), try write(&buffer, values));
     try std.testing.expectError(error.OutOfMemory, write(buffer[0..1], values));
 }

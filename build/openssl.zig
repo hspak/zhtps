@@ -3,18 +3,20 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const sources = @import("openssl/sources.zon");
-const log = std.log.scoped(.build_openssl);
 
 pub const Options = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 };
 
+pub const AddLibraryError = error{UnsupportedTarget};
+
 /// Returns null while Zig fetches the lazy upstream dependency and reruns configuration.
-pub fn addLibrary(b: *std.Build, options: Options) ?*std.Build.Step.Compile {
-    const source = b.lazyDependency("openssl", .{}) orelse return null;
+/// Returns UnsupportedTarget for targets without matching generated OpenSSL inputs.
+pub fn addLibrary(b: *std.Build, options: Options) AddLibraryError!?*std.Build.Step.Compile {
     if (options.target.result.os.tag != .linux or options.target.result.cpu.arch != .x86_64)
-        @panic("bundled OpenSSL requires Linux on x86_64");
+        return error.UnsupportedTarget;
+    const source = b.lazyDependency("openssl", .{}) orelse return null;
     const module = b.createModule(.{
         .target = options.target,
         .optimize = options.optimize,

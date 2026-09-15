@@ -1,10 +1,9 @@
 //! Linux x86-64-v4 primitives used outside the io_uring submission/completion loop.
 
 const std = @import("std");
-pub const linux = std.os.linux;
 const builtin = @import("builtin");
+pub const linux = std.os.linux;
 const zeit = @import("zeit");
-const log = std.log.scoped(.platform);
 
 comptime {
     if (builtin.os.tag != .linux or builtin.cpu.arch != .x86_64)
@@ -34,11 +33,7 @@ pub const Error = error{
 /// rejected explicitly; affinity is optional on such hosts.
 pub fn getAffinity() Error!linux.cpu_set_t {
     var mask: linux.cpu_set_t = undefined;
-    const result = linux.sched_getaffinity(
-        0,
-        @sizeOf(linux.cpu_set_t),
-        &mask,
-    );
+    const result = linux.sched_getaffinity(0, @sizeOf(linux.cpu_set_t), &mask);
     if (linux.errno(result) == .INVAL) return error.AffinityMaskTooSmall;
     _ = try check(result);
     return mask;
@@ -98,7 +93,8 @@ pub fn check(result: usize) Error!usize {
 /// Returns monotonic nanoseconds for elapsed-time and deadline comparisons.
 pub fn monotonicNs() u64 {
     var ts: linux.timespec = undefined;
-    std.debug.assert(linux.clock_gettime(.MONOTONIC, &ts) == 0);
+    const result = linux.clock_gettime(.MONOTONIC, &ts);
+    std.debug.assert(result == 0);
     return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
 }
 
@@ -115,19 +111,8 @@ pub fn close(fd: linux.fd_t) void {
 }
 
 /// Copies a signed integer socket option into the kernel; retains no caller storage.
-pub fn setOption(
-    fd: linux.fd_t,
-    level: i32,
-    option: u32,
-    value: i32,
-) Error!void {
-    _ = try check(linux.setsockopt(
-        fd,
-        level,
-        option,
-        std.mem.asBytes(&value),
-        @sizeOf(i32),
-    ));
+pub fn setOption(fd: linux.fd_t, level: i32, option: u32, value: i32) Error!void {
+    _ = try check(linux.setsockopt(fd, level, option, std.mem.asBytes(&value), @sizeOf(i32)));
 }
 
 pub const Listener = struct {
@@ -146,11 +131,7 @@ pub const ListenOptions = struct {
 
 /// Returns an owned listener; the caller closes it after stopping its accepts.
 /// A zero port requests a kernel-assigned port, returned in the result.
-pub fn listen(
-    address: []const u8,
-    port: u16,
-    options: ListenOptions,
-) Error!Listener {
+pub fn listen(address: []const u8, port: u16, options: ListenOptions) Error!Listener {
     const ip = std.Io.net.IpAddress.parse(address, port) catch return error.InvalidAddress;
     const domain: u32 = switch (ip) {
         .ip4 => linux.AF.INET,
@@ -162,18 +143,8 @@ pub fn listen(
         linux.IPPROTO.TCP,
     )));
     errdefer close(fd);
-    try setOption(
-        fd,
-        linux.SOL.SOCKET,
-        linux.SO.REUSEADDR,
-        1,
-    );
-    if (options.reuse_port) try setOption(
-        fd,
-        linux.SOL.SOCKET,
-        linux.SO.REUSEPORT,
-        1,
-    );
+    try setOption(fd, linux.SOL.SOCKET, linux.SO.REUSEADDR, 1);
+    if (options.reuse_port) try setOption(fd, linux.SOL.SOCKET, linux.SO.REUSEPORT, 1);
     if (options.thin_linear_timeouts) {
         const enabled: i32 = 1;
         const result = linux.setsockopt(
@@ -198,26 +169,13 @@ pub fn listen(
                 .port = std.mem.nativeToBig(u16, port),
                 .addr = @bitCast(v4.bytes),
             };
-            _ = try check(linux.bind(
-                fd,
-                @ptrCast(&addr),
-                @sizeOf(@TypeOf(addr)),
-            ));
+            _ = try check(linux.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))));
             var len: linux.socklen_t = @sizeOf(@TypeOf(addr));
-            _ = try check(linux.getsockname(
-                fd,
-                @ptrCast(&addr),
-                &len,
-            ));
+            _ = try check(linux.getsockname(fd, @ptrCast(&addr), &len));
             actual_port = std.mem.bigToNative(u16, addr.port);
         },
         .ip6 => |v6| {
-            try setOption(
-                fd,
-                linux.IPPROTO.IPV6,
-                linux.IPV6.V6ONLY,
-                1,
-            );
+            try setOption(fd, linux.IPPROTO.IPV6, linux.IPV6.V6ONLY, 1);
             var addr: linux.sockaddr.in6 = .{
                 .family = linux.AF.INET6,
                 .port = std.mem.nativeToBig(u16, port),
@@ -225,17 +183,9 @@ pub fn listen(
                 .addr = v6.bytes,
                 .scope_id = 0,
             };
-            _ = try check(linux.bind(
-                fd,
-                @ptrCast(&addr),
-                @sizeOf(@TypeOf(addr)),
-            ));
+            _ = try check(linux.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))));
             var len: linux.socklen_t = @sizeOf(@TypeOf(addr));
-            _ = try check(linux.getsockname(
-                fd,
-                @ptrCast(&addr),
-                &len,
-            ));
+            _ = try check(linux.getsockname(fd, @ptrCast(&addr), &len));
             actual_port = std.mem.bigToNative(u16, addr.port);
         },
     }
@@ -247,11 +197,7 @@ test "accepted IPv4 and IPv6 sockets inherit the listener retry option" {
     const testing = std.testing;
     for ([_][]const u8{ "127.0.0.1", "::1" }) |host| {
         for ([_]bool{ false, true }) |enabled| {
-            const listener = try listen(
-                host,
-                0,
-                .{ .thin_linear_timeouts = enabled },
-            );
+            const listener = try listen(host, 0, .{ .thin_linear_timeouts = enabled });
             defer close(listener.fd);
             const ip = try std.Io.net.IpAddress.parse(host, listener.port);
             const domain: u32 = switch (ip) {

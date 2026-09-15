@@ -5,7 +5,6 @@ const Config = @import("Config.zig");
 const c = @cImport({
     @cInclude("tls_openssl.h");
 });
-const log = std.log.scoped(.tls);
 const Tls = @This();
 
 handle: *c.SSL_CTX,
@@ -47,18 +46,9 @@ pub const Session = struct {
         errdefer c.SSL_free(ssl);
         var internal: ?*c.BIO = null;
         var network: ?*c.BIO = null;
-        if (c.BIO_new_bio_pair(
-            &internal,
-            18 * 1024,
-            &network,
-            18 * 1024,
-        ) != 1)
+        if (c.BIO_new_bio_pair(&internal, 18 * 1024, &network, 18 * 1024) != 1)
             return failure(error.OutOfMemory);
-        c.SSL_set_bio(
-            ssl,
-            internal,
-            internal,
-        );
+        c.SSL_set_bio(ssl, internal, internal);
         c.SSL_set_accept_state(ssl);
         self.* = .{ .ssl = ssl, .network = network.? };
     }
@@ -79,37 +69,21 @@ pub const Session = struct {
     pub fn isHttp2(self: *const Session) bool {
         var protocol: [*c]const u8 = null;
         var len: c_uint = 0;
-        c.SSL_get0_alpn_selected(
-            self.ssl,
-            &protocol,
-            &len,
-        );
-        return len == 2 and std.mem.eql(
-            u8,
-            protocol[0..len],
-            "h2",
-        );
+        c.SSL_get0_alpn_selected(self.ssl, &protocol, &len);
+        return len == 2 and std.mem.eql(u8, protocol[0..len], "h2");
     }
 
     /// Copies ciphertext into the bounded BIO. The caller retains any remainder.
     /// These duplex methods require a completed handshake and transport buffers
     /// independent of BIO storage, so socket reads and writes can overlap.
     pub fn feedCiphertext(self: *Session, bytes: []const u8) usize {
-        const count = c.BIO_write(
-            self.network,
-            bytes.ptr,
-            @intCast(bytes.len),
-        );
+        const count = c.BIO_write(self.network, bytes.ptr, @intCast(bytes.len));
         return if (count > 0) @intCast(count) else 0;
     }
 
     /// Copies pending ciphertext into caller-owned asynchronous send storage.
     pub fn drainCiphertext(self: *Session, bytes: []u8) usize {
-        const count = c.BIO_read(
-            self.network,
-            bytes.ptr,
-            @intCast(bytes.len),
-        );
+        const count = c.BIO_read(self.network, bytes.ptr, @intCast(bytes.len));
         return if (count > 0) @intCast(count) else 0;
     }
 
@@ -117,12 +91,7 @@ pub const Session = struct {
     pub fn readPlaintext(self: *Session, bytes: []u8) Error!?usize {
         c.ERR_clear_error();
         var count: usize = 0;
-        const result = c.SSL_read_ex(
-            self.ssl,
-            bytes.ptr,
-            bytes.len,
-            &count,
-        );
+        const result = c.SSL_read_ex(self.ssl, bytes.ptr, bytes.len, &count);
         if (result == 1) return count;
         return switch (c.SSL_get_error(self.ssl, result)) {
             c.SSL_ERROR_WANT_READ, c.SSL_ERROR_WANT_WRITE => null,
@@ -142,12 +111,7 @@ pub const Session = struct {
     pub fn writePlaintext(self: *Session, bytes: []const u8) Error!?usize {
         c.ERR_clear_error();
         var count: usize = 0;
-        const result = c.SSL_write_ex(
-            self.ssl,
-            bytes.ptr,
-            bytes.len,
-            &count,
-        );
+        const result = c.SSL_write_ex(self.ssl, bytes.ptr, bytes.len, &count);
         if (result == 1) return count;
         return switch (c.SSL_get_error(self.ssl, result)) {
             c.SSL_ERROR_WANT_READ, c.SSL_ERROR_WANT_WRITE => null,
@@ -168,22 +132,14 @@ pub const Session = struct {
     /// Commits bytes written into the receive slice returned by advance.
     pub fn received(self: *Session, count: usize) void {
         var buffer: [*c]u8 = undefined;
-        const committed = c.BIO_nwrite(
-            self.network,
-            &buffer,
-            @intCast(count),
-        );
+        const committed = c.BIO_nwrite(self.network, &buffer, @intCast(count));
         std.debug.assert(committed == count);
     }
 
     /// Releases bytes from the send slice returned by advance after socket I/O.
     pub fn sent(self: *Session, count: usize) void {
         var buffer: [*c]u8 = undefined;
-        const committed = c.BIO_nread(
-            self.network,
-            &buffer,
-            @intCast(count),
-        );
+        const committed = c.BIO_nread(self.network, &buffer, @intCast(count));
         std.debug.assert(committed == count);
     }
 
@@ -213,12 +169,7 @@ pub const Session = struct {
                     bytes.len - self.read_count,
                     &count,
                 ),
-                .write => |bytes| c.SSL_write_ex(
-                    self.ssl,
-                    bytes.ptr,
-                    bytes.len,
-                    &count,
-                ),
+                .write => |bytes| c.SSL_write_ex(self.ssl, bytes.ptr, bytes.len, &count),
                 .shutdown => c.SSL_shutdown(self.ssl),
                 .idle => unreachable,
             };
@@ -272,11 +223,7 @@ comptime {
 
 /// Loads credentials before listeners start. Owns the OpenSSL configuration;
 /// sessions may share it across threads, but configuration is immutable after init.
-pub fn init(
-    self: *Tls,
-    gpa: std.mem.Allocator,
-    options: Config.Tls,
-) Error!void {
+pub fn init(self: *Tls, gpa: std.mem.Allocator, options: Config.Tls) Error!void {
     const certificate = try gpa.dupeZ(u8, options.certificate);
     defer gpa.free(certificate);
     const private_key = try gpa.dupeZ(u8, options.private_key);
@@ -303,27 +250,15 @@ pub fn init(
     c.SSL_CTX_set_default_passwd_cb(handle, rejectPassword);
     if (c.SSL_CTX_use_certificate_chain_file(handle, certificate.ptr) != 1)
         return failure(error.InvalidCertificate);
-    if (c.SSL_CTX_use_PrivateKey_file(
-        handle,
-        private_key.ptr,
-        c.SSL_FILETYPE_PEM,
-    ) != 1 or
+    if (c.SSL_CTX_use_PrivateKey_file(handle, private_key.ptr, c.SSL_FILETYPE_PEM) != 1 or
         c.SSL_CTX_check_private_key(handle) != 1) return failure(error.InvalidPrivateKey);
-    c.SSL_CTX_set_alpn_select_cb(
-        handle,
-        selectProtocol,
-        null,
-    );
+    c.SSL_CTX_set_alpn_select_cb(handle, selectProtocol, null);
     // Shared credentials also share the bounded session cache and ticket keys
     // across all workers; no process-shared cache or custom ticket crypto needed.
     _ = c.SSL_CTX_set_session_cache_mode(handle, c.SSL_SESS_CACHE_SERVER);
     _ = c.SSL_CTX_sess_set_cache_size(handle, 1024);
     _ = c.SSL_CTX_set_timeout(handle, 300);
-    if (c.SSL_CTX_set_session_id_context(
-        handle,
-        "zhtps",
-        5,
-    ) != 1)
+    if (c.SSL_CTX_set_session_id_context(handle, "zhtps", 5) != 1)
         return failure(error.InvalidTlsConfiguration);
     self.* = .{ .handle = handle };
 }
@@ -334,12 +269,7 @@ pub fn deinit(self: *Tls) void {
     self.* = undefined;
 }
 
-fn rejectPassword(
-    _: [*c]u8,
-    _: c_int,
-    _: c_int,
-    _: ?*anyopaque,
-) callconv(.c) c_int {
+fn rejectPassword(_: [*c]u8, _: c_int, _: c_int, _: ?*anyopaque) callconv(.c) c_int {
     return 0;
 }
 
@@ -358,11 +288,7 @@ fn selectProtocol(
             const len = protocols[offset];
             offset += 1;
             if (len == 0 or len > protocols.len - offset) return c.SSL_TLSEXT_ERR_ALERT_FATAL;
-            if (std.mem.eql(
-                u8,
-                protocols[offset..][0..len],
-                preferred,
-            )) {
+            if (std.mem.eql(u8, protocols[offset..][0..len], preferred)) {
                 out.* = protocols[offset..].ptr;
                 out_len.* = len;
                 return c.SSL_TLSEXT_ERR_OK;

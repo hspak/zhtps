@@ -3,7 +3,6 @@
 const std = @import("std");
 const nghttp2 = @import("build/nghttp2.zig");
 const openssl = @import("build/openssl.zig");
-const log = std.log.scoped(.build);
 
 const DeclarationOptions = struct {
     module: *std.Build.Module,
@@ -11,7 +10,7 @@ const DeclarationOptions = struct {
     optimize: std.builtin.OptimizeMode,
 };
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const format_paths = &.{
         "build.zig",
         "build.zig.zon",
@@ -77,7 +76,7 @@ pub fn build(b: *std.Build) void {
     if (system_openssl) {
         mod.linkSystemLibrary("ssl", .{});
         mod.linkSystemLibrary("crypto", .{});
-    } else if (openssl.addLibrary(b, .{ .target = target, .optimize = optimize })) |library| {
+    } else if (try openssl.addLibrary(b, .{ .target = target, .optimize = optimize })) |library| {
         mod.linkLibrary(library);
     }
     if (system_nghttp2) {
@@ -105,29 +104,17 @@ pub fn build(b: *std.Build) void {
             &b.graph.environ_map,
         ) catch @panic("cannot discover native library search paths");
         for (paths.include_dirs.items) |path| {
-            std.Io.Dir.cwd().access(
-                b.graph.io,
-                path,
-                .{},
-            ) catch continue;
+            std.Io.Dir.cwd().access(b.graph.io, path, .{}) catch continue;
             mod.addSystemIncludePath(.{ .cwd_relative = path });
         }
         for (paths.lib_dirs.items) |path| {
-            std.Io.Dir.cwd().access(
-                b.graph.io,
-                path,
-                .{},
-            ) catch continue;
+            std.Io.Dir.cwd().access(b.graph.io, path, .{}) catch continue;
             mod.addLibraryPath(.{ .cwd_relative = path });
         }
         for (paths.rpaths.items) |path| mod.addRPath(.{ .cwd_relative = path });
     }
     exe.pie = true;
-    if (b.option(
-        bool,
-        "build-server",
-        "Install the standalone server executable",
-    ) orelse true) {
+    if (b.option(bool, "build-server", "Install the standalone server executable") orelse true) {
         b.installArtifact(exe);
         if (!system_openssl)
             b.installFile("licenses/openssl.txt", "share/licenses/zhtps/openssl.txt");
@@ -153,11 +140,7 @@ pub fn build(b: *std.Build) void {
     upload_options.addOption(
         bool,
         "streaming",
-        b.option(
-            bool,
-            "body-streaming",
-            "Use the incremental upload consumer",
-        ) orelse true,
+        b.option(bool, "body-streaming", "Use the incremental upload consumer") orelse true,
     );
     upload_options.addOption(
         bool,
@@ -211,11 +194,7 @@ pub fn build(b: *std.Build) void {
     const executor_wire = b.addSystemCommand(&.{ "python3", "tests/application_executor.py" });
     executor_wire.addArtifactArg(application_bench);
     b.step("test-application", "Check shared executor scheduling and lifetime").dependOn(&executor_wire.step);
-    const filter = b.option(
-        []const u8,
-        "test-filter",
-        "Run tests whose names contain this text",
-    );
+    const filter = b.option([]const u8, "test-filter", "Run tests whose names contain this text");
     const tests = b.addTest(.{
         .root_module = mod,
         .filters = if (filter) |name| &.{name} else &.{},
@@ -386,11 +365,7 @@ fn addEndpointDeclarationTests(
     };
     for (errors, 0..) |message, index| {
         const scenario = b.addOptions();
-        scenario.addOption(
-            usize,
-            "index",
-            index,
-        );
+        scenario.addOption(usize, "index", index);
         const check = b.addTest(.{
             .name = b.fmt("endpoint-declaration-{d}", .{index}),
             .root_module = b.createModule(.{

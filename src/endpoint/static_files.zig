@@ -6,7 +6,6 @@ const linux = std.os.linux;
 const http = @import("../http.zig");
 const platform = @import("../platform.zig");
 const ResponseStream = @import("ResponseStream.zig");
-const log = std.log.scoped(.static_files);
 
 pub const Options = struct {
     /// URL-escaped path relative to directory. Null uses the request path without '/'.
@@ -33,11 +32,7 @@ pub const Transfer = struct {
 /// Rejects invalid static configuration before an application can run.
 pub fn validateOptions(comptime options: Options) void {
     if (options.index_file) |index| {
-        if (!validSegment(index, options.dotfiles) or std.mem.indexOfScalar(
-            u8,
-            index,
-            '/',
-        ) != null)
+        if (!validSegment(index, options.dotfiles) or std.mem.indexOfScalar(u8, index, '/') != null)
             @compileError("static index_file must be a single permitted filename");
     }
     if (!http.syntax.isField(options.cache_control))
@@ -46,30 +41,14 @@ pub fn validateOptions(comptime options: Options) void {
 
 /// Borrows directory for this call; transfers the opened file to the exchange only
 /// after all fallible preparation succeeds. Response fields live in request scratch.
-pub fn serve(
-    call: anytype,
-    directory: std.Io.Dir,
-    options: Options,
-) Error!http.Response {
+pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.Response {
     const gpa = call.scratch.allocator();
-    const encoded = options.path orelse std.mem.trimStart(
-        u8,
-        call.request.path,
-        "/",
-    );
-    const path = decodePath(
-        gpa,
-        encoded,
-        options.dotfiles,
-    ) catch |err| switch (err) {
+    const encoded = options.path orelse std.mem.trimStart(u8, call.request.path, "/");
+    const path = decodePath(gpa, encoded, options.dotfiles) catch |err| switch (err) {
         error.InvalidInput => return call.text(.not_found, http.Response.errorBody(404)),
         error.OutOfMemory => return err,
     };
-    var file = openPath(
-        call.io,
-        directory,
-        path,
-    ) catch |err| return failure(call, err);
+    var file = openPath(call.io, directory, path) catch |err| return failure(call, err);
     var owned = true;
     defer if (owned) file.close(call.io);
     var stat = try file.stat(call.io);
@@ -77,11 +56,7 @@ pub fn serve(
     if (stat.kind == .directory) {
         const index = options.index_file orelse
             return call.text(.not_found, http.Response.errorBody(404));
-        if (!validSegment(index, options.dotfiles) or std.mem.indexOfScalar(
-            u8,
-            index,
-            '/',
-        ) != null)
+        if (!validSegment(index, options.dotfiles) or std.mem.indexOfScalar(u8, index, '/') != null)
             return error.InvalidInput;
         const index_file = openFile(.{ .handle = file.handle }, index) catch |err|
             return failure(call, err);
@@ -90,29 +65,17 @@ pub fn serve(
         stat = try file.stat(call.io);
         name = index;
         if (stat.kind != .file) return call.text(.not_found, http.Response.errorBody(404));
-        if (!std.mem.endsWith(
-            u8,
-            call.request.path,
-            "/",
-        )) {
+        if (!std.mem.endsWith(u8, call.request.path, "/")) {
             // An absolute-path reference with one leading slash cannot redirect to
             // an authority when a request path begins with repeated slashes.
             const location = try std.fmt.allocPrint(gpa, "/{s}/{s}{s}", .{
-                std.mem.trimStart(
-                    u8,
-                    call.request.path,
-                    "/",
-                ),
+                std.mem.trimStart(u8, call.request.path, "/"),
                 if (call.request.query.len != 0) "?" else "",
                 call.request.query,
             });
             return call.redirect(.permanent_redirect, location);
         }
-    } else if (stat.kind != .file or std.mem.endsWith(
-        u8,
-        path,
-        "/",
-    )) {
+    } else if (stat.kind != .file or std.mem.endsWith(u8, path, "/")) {
         return call.text(.not_found, http.Response.errorBody(404));
     }
 
@@ -149,7 +112,7 @@ pub fn serve(
     call.response_file.* = .{ .file = file, .length = stat.size };
     owned = false;
     const C = @TypeOf(call.*);
-    const Producer = struct {
+    const producer = struct {
         fn run(request_call: *C, output: *ResponseStream) C.HandlerError!void {
             const transfer = request_call.response_file.*.?;
             var buffer: [16 * 1024]u8 = undefined;
@@ -171,7 +134,7 @@ pub fn serve(
     return call.stream(.{
         .headers = fields[0..field_count],
         .length = stat.size,
-    }, Producer.run);
+    }, producer.run);
 }
 
 fn failure(call: anytype, err: Error) Error!http.Response {
@@ -187,18 +150,13 @@ fn failure(call: anytype, err: Error) Error!http.Response {
     };
 }
 
-fn decodePath(
-    gpa: Allocator,
-    encoded: []const u8,
-    dotfiles: bool,
-) (Allocator.Error ||
+// Successful paths borrow a prefix of their allocation from request scratch;
+// invalid paths release the entire allocation before returning.
+fn decodePath(gpa: Allocator, encoded: []const u8, dotfiles: bool) (Allocator.Error ||
     error{InvalidInput})![]const u8 {
-    if (std.mem.startsWith(
-        u8,
-        encoded,
-        "/",
-    )) return error.InvalidInput;
+    if (std.mem.startsWith(u8, encoded, "/")) return error.InvalidInput;
     const decoded = try gpa.alloc(u8, encoded.len);
+    errdefer gpa.free(decoded);
     var read: usize = 0;
     var written: usize = 0;
     while (read < encoded.len) : (written += 1) {
@@ -216,11 +174,7 @@ fn decodePath(
         decoded[written] = byte;
     }
     const path = decoded[0..written];
-    var segments = std.mem.tokenizeScalar(
-        u8,
-        path,
-        '/',
-    );
+    var segments = std.mem.tokenizeScalar(u8, path, '/');
     while (segments.next()) |segment| {
         if (!validSegment(segment, dotfiles)) return error.InvalidInput;
     }
@@ -228,16 +182,8 @@ fn decodePath(
 }
 
 fn validSegment(segment: []const u8, dotfiles: bool) bool {
-    if (segment.len == 0 or std.mem.eql(
-        u8,
-        segment,
-        ".",
-    ) or
-        std.mem.eql(
-            u8,
-            segment,
-            "..",
-        )) return false;
+    if (segment.len == 0 or std.mem.eql(u8, segment, ".") or
+        std.mem.eql(u8, segment, "..")) return false;
     if (!dotfiles and segment[0] == '.') return false;
     for (segment) |byte| {
         if (byte < 0x20 or byte == 0x7f or byte == '\\') return false;
@@ -245,27 +191,15 @@ fn validSegment(segment: []const u8, dotfiles: bool) bool {
     return true;
 }
 
-fn openPath(
-    io: std.Io,
-    root: std.Io.Dir,
-    path: []const u8,
-) Error!std.Io.File {
+fn openPath(io: std.Io, root: std.Io.Dir, path: []const u8) Error!std.Io.File {
     var directory = root;
     var owned = false;
     defer if (owned) directory.close(io);
-    var segments = std.mem.tokenizeScalar(
-        u8,
-        path,
-        '/',
-    );
+    var segments = std.mem.tokenizeScalar(u8, path, '/');
     var segment = segments.next() orelse return openFile(root, ".");
     while (segments.next()) |next| {
         // Each lookup contains one component: NOFOLLOW also protects ancestors.
-        const child = try directory.openDir(
-            io,
-            segment,
-            .{ .follow_symlinks = false },
-        );
+        const child = try directory.openDir(io, segment, .{ .follow_symlinks = false });
         if (owned) directory.close(io);
         directory = child;
         owned = true;
@@ -338,4 +272,18 @@ fn contentType(path: []const u8) []const u8 {
         if (std.ascii.eqlIgnoreCase(extension, entry[0])) return entry[1];
     }
     return "application/octet-stream";
+}
+
+test "invalid static paths release decoding storage" {
+    const testing = std.testing;
+    for ([_][]const u8{
+        "%",
+        "%GG",
+        "%2f",
+        "%00",
+        "a/..",
+        ".hidden",
+    }) |path| {
+        try testing.expectError(error.InvalidInput, decodePath(testing.allocator, path, false));
+    }
 }

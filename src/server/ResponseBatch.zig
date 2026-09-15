@@ -1,7 +1,6 @@
 //! Owned response bytes and completion records borrowed from a worker's fixed pool.
 
 const std = @import("std");
-const log = std.log.scoped(.response_batch);
 const ResponseBatch = @This();
 
 bytes: [4096]u8 = undefined,
@@ -30,11 +29,7 @@ pub const Response = struct {
 };
 
 /// Copies one complete serialization and its owned metadata. Asserts both fit.
-pub fn append(
-    batch: *ResponseBatch,
-    bytes: []const u8,
-    response: Response,
-) void {
+pub fn append(batch: *ResponseBatch, bytes: []const u8, response: Response) void {
     std.debug.assert(!batch.sending and batch.count < batch.responses.len);
     std.debug.assert(bytes.len > 0 and bytes.len <= batch.bytes.len - batch.len);
     @memcpy(batch.bytes[batch.len..][0..bytes.len], bytes);

@@ -3,7 +3,6 @@
 const std = @import("std");
 const Config = @import("../Config.zig");
 const server = @import("../server.zig");
-const log = std.log.scoped(.endpoint_server);
 
 /// Owns the transport and executor resources for a generated application.
 pub fn Server(comptime App: type) type {

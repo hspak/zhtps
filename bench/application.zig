@@ -3,7 +3,6 @@
 const std = @import("std");
 const zhtps = @import("zhtps");
 const linux = zhtps.platform.linux;
-const log = std.log.scoped(.bench_application);
 
 var stopping: std.atomic.Value(bool) = .init(false);
 var gate: std.atomic.Value(bool) = .init(false);
@@ -14,7 +13,7 @@ fn signal(sig: linux.SIG) callconv(.c) void {
 }
 
 const api = struct {
-    const C = zhtps.Call(@This());
+    const C = zhtps.Call(api);
     pub const Services = struct {
         requests: std.atomic.Value(u64) = .init(0),
         holding: std.atomic.Value(u64) = .init(0),
@@ -45,22 +44,14 @@ const api = struct {
 
     fn mixed(call: *C) !zhtps.http.Response {
         if (call.services.requests.fetchAdd(1, .monotonic) % 10 == 0)
-            std.Io.sleep(
-                call.io,
-                .fromMilliseconds(10),
-                .awake,
-            ) catch {};
+            std.Io.sleep(call.io, .fromMilliseconds(10), .awake) catch {};
         return fast(call);
     }
 
     fn hold(call: *C) !zhtps.http.Response {
         _ = call.services.holding.fetchAdd(1, .release);
         while (!gate.load(.acquire))
-            std.Io.sleep(
-                call.io,
-                .fromMilliseconds(1),
-                .awake,
-            ) catch {};
+            std.Io.sleep(call.io, .fromMilliseconds(1), .awake) catch {};
         return fast(call);
     }
 
@@ -72,11 +63,7 @@ const api = struct {
     }
 
     pub fn release(call: *C) void {
-        if (std.mem.eql(
-            u8,
-            call.request.path,
-            "/hold",
-        ))
+        if (std.mem.eql(u8, call.request.path, "/hold"))
             _ = call.services.released.fetchAdd(1, .release);
     }
 };
@@ -94,19 +81,10 @@ pub fn main(init: std.process.Init) !void {
         .INT,
         .USR1,
     }) |sig|
-        _ = try zhtps.platform.check(linux.sigaction(
-            sig,
-            &action,
-            null,
-        ));
+        _ = try zhtps.platform.check(linux.sigaction(sig, &action, null));
     var services: api.Services = .{};
     var server: zhtps.Server(zhtps.Application(api)) = undefined;
-    try server.initApplication(
-        init.gpa,
-        init.io,
-        config,
-        &services,
-    );
+    try server.initApplication(init.gpa, init.io, config, &services);
     defer server.deinit();
     for (server.shared.workers) |*worker| worker.stop = &stopping;
     try server.serve();

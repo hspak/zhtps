@@ -2,15 +2,10 @@
 
 const std = @import("std");
 const zhtps = @import("zhtps");
-const log = std.log.scoped(.embedded_endpoints);
 
 // The caller frees the captured response with std.testing.allocator.
 fn request(comptime Spec: type, bytes: []const u8) ![]const u8 {
-    return requestWithOptions(
-        Spec,
-        .{},
-        bytes,
-    );
+    return requestWithOptions(Spec, .{}, bytes);
 }
 
 // The caller frees the captured response with std.testing.allocator.
@@ -44,11 +39,7 @@ fn requestWithOptions(
     );
     defer server.deinit();
     var serving: Serving = .{ .server = &server };
-    const thread = try std.Thread.spawn(
-        .{},
-        Serving.run,
-        .{&serving},
-    );
+    const thread = try std.Thread.spawn(.{}, Serving.run, .{&serving});
     defer {
         server.requestStop();
         thread.join();
@@ -64,7 +55,7 @@ fn requestWithOptions(
 }
 
 const api = struct {
-    const C = zhtps.Call(@This());
+    const C = zhtps.Call(api);
     fn respond(call: *C) zhtps.EndpointError!zhtps.http.Response {
         return call.text(.ok, call.route_name);
     }
@@ -105,44 +96,24 @@ test "generated error responses retain headers and preserve keep alive" {
         "PUT /items/1 HTTP/1.1\r\nHost: example\r\n\r\n" ++
         "GET /items/1 HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n");
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        bytes,
-        "HTTP/1.1 404",
-    ));
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        bytes,
-        "HTTP/1.1 405",
-    ) != null);
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "HTTP/1.1 404"));
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "HTTP/1.1 405") != null);
     try std.testing.expect(std.mem.indexOf(
         u8,
         bytes,
         "Allow: GET, HEAD, OPTIONS, POST\r\n",
     ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        bytes,
-        "HTTP/1.1 200",
-    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "HTTP/1.1 200") != null);
 }
 
 test "generated OPTIONS retains Allow and supports the server target" {
     const bytes = try request(api, "OPTIONS /items/1 HTTP/1.1\r\nHost: example\r\n\r\n" ++
         "OPTIONS * HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n");
     defer std.testing.allocator.free(bytes);
-    try std.testing.expectEqual(@as(usize, 2), std.mem.count(
-        u8,
-        bytes,
-        "HTTP/1.1 204",
-    ));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, bytes, "HTTP/1.1 204"));
     try std.testing.expectEqual(
         @as(usize, 2),
-        std.mem.count(
-            u8,
-            bytes,
-            "Allow: GET, HEAD, OPTIONS, POST\r\n",
-        ),
+        std.mem.count(u8, bytes, "Allow: GET, HEAD, OPTIONS, POST\r\n"),
     );
 }
 
@@ -152,27 +123,15 @@ test "middleware InvalidInput is a client error" {
         "GET /invalid HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n",
     );
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        bytes,
-        "HTTP/1.1 400",
-    ));
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "HTTP/1.1 400"));
 }
 
 test "literal routes win over parameters even for method rejection" {
     const bytes = try request(api, "GET /items/new HTTP/1.1\r\nHost: example\r\n\r\n" ++
         "POST /items/new HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n");
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        bytes,
-        "\r\n\r\nstaticHTTP/1.1 405",
-    ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        bytes,
-        "Allow: GET, HEAD, OPTIONS\r\n",
-    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\r\n\r\nstaticHTTP/1.1 405") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "Allow: GET, HEAD, OPTIONS\r\n") != null);
 }
 
 test "query lookup decodes names plus and percent without changing duplicates" {
@@ -234,11 +193,7 @@ test "explicit HEAD wins and OPTIONS runs shared middleware before generating" {
             return null;
         }
         fn cors(call: *C) zhtps.EndpointError!?zhtps.http.Response {
-            if (std.mem.eql(
-                u8,
-                call.request.method,
-                "OPTIONS",
-            ) and call.header("Origin") != null) {
+            if (std.mem.eql(u8, call.request.method, "OPTIONS") and call.header("Origin") != null) {
                 return .{
                     .status = 204,
                     .headers = &.{
@@ -274,41 +229,17 @@ test "explicit HEAD wins and OPTIONS runs shared middleware before generating" {
         "HEAD /v1/items/1 HTTP/1.1\r\nHost: example\r\nAuthorization: bearer token\r\n" ++
         "Connection: close\r\n\r\n");
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        bytes,
-        "HTTP/1.1 401",
-    ));
-    try std.testing.expectEqual(@as(usize, 2), std.mem.count(
-        u8,
-        bytes,
-        "HTTP/1.1 204",
-    ));
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        bytes,
-        "Allow: GET, HEAD, OPTIONS\r\n",
-    ) != null);
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "HTTP/1.1 401"));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, bytes, "HTTP/1.1 204"));
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "Allow: GET, HEAD, OPTIONS\r\n") != null);
     try std.testing.expect(std.mem.indexOf(
         u8,
         bytes,
         "Access-Control-Allow-Origin: https://example.test\r\n",
     ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        bytes,
-        "HTTP/1.1 202 Accepted\r\n",
-    ) != null);
-    try std.testing.expect(std.mem.endsWith(
-        u8,
-        bytes,
-        "\r\n\r\n",
-    ));
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        bytes,
-        "representation",
-    ) == null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "HTTP/1.1 202 Accepted\r\n") != null);
+    try std.testing.expect(std.mem.endsWith(u8, bytes, "\r\n\r\n"));
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "representation") == null);
 }
 
 test "request release frees owned locals on completion early response body abort and timeout" {
@@ -360,28 +291,12 @@ test "request release frees owned locals on completion early response body abort
         "POST / HTTP/1.1\r\nHost: example\r\nContent-Length: 4\r\nConnection: close\r\n\r\n",
     };
     for (cases, 0..) |bytes, index| {
-        const result = try requestWithOptions(
-            owned,
-            .{ .services = &services },
-            bytes,
-        );
+        const result = try requestWithOptions(owned, .{ .services = &services }, bytes);
         defer std.testing.allocator.free(result);
         if (index == 0)
-            try std.testing.expectEqual(@as(usize, 2), std.mem.count(
-                u8,
-                result,
-                "\r\n\r\nowned",
-            ));
-        if (index == 1) try std.testing.expect(std.mem.startsWith(
-            u8,
-            result,
-            "HTTP/1.1 403",
-        ));
-        if (index == 2) try std.testing.expect(std.mem.startsWith(
-            u8,
-            result,
-            "HTTP/1.1 413",
-        ));
+            try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, result, "\r\n\r\nowned"));
+        if (index == 1) try std.testing.expect(std.mem.startsWith(u8, result, "HTTP/1.1 403"));
+        if (index == 2) try std.testing.expect(std.mem.startsWith(u8, result, "HTTP/1.1 413"));
         if (index >= 3) try std.testing.expectEqual(@as(usize, 0), result.len);
         try std.testing.expectEqual(
             services.acquired.load(.monotonic),
@@ -415,26 +330,10 @@ test "response helpers serve redirects empty responses and body boundary scratch
             "Connection: close\r\n\r\n12345678",
     );
     defer std.testing.allocator.free(result);
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        result,
-        "HTTP/1.1 204",
-    ));
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "HTTP/1.1 303 See Other\r\n",
-    ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "Location: /new-location\r\n",
-    ) != null);
-    try std.testing.expect(std.mem.endsWith(
-        u8,
-        result,
-        "{\"bytes\":8}",
-    ));
+    try std.testing.expect(std.mem.startsWith(u8, result, "HTTP/1.1 204"));
+    try std.testing.expect(std.mem.indexOf(u8, result, "HTTP/1.1 303 See Other\r\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "Location: /new-location\r\n") != null);
+    try std.testing.expect(std.mem.endsWith(u8, result, "{\"bytes\":8}"));
 }
 
 test "sixty four declared routes compile and dispatch the last route" {
@@ -455,11 +354,7 @@ test "sixty four declared routes compile and dispatch the last route" {
         "GET /many/63 HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n",
     );
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.endsWith(
-        u8,
-        bytes,
-        "\r\n\r\n/many/63",
-    ));
+    try std.testing.expect(std.mem.endsWith(u8, bytes, "\r\n\r\n/many/63"));
 }
 
 test "memory regression rejects wrapping allocation counts over HTTP" {
@@ -479,16 +374,12 @@ test "memory regression rejects wrapping allocation counts over HTTP" {
     );
     const bytes = try request(spec, wire);
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        bytes,
-        "HTTP/1.1 500",
-    ));
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "HTTP/1.1 500"));
 }
 
 test "memory regression rejects deeply nested JSON input over HTTP" {
     const spec = struct {
-        const Node = struct { next: ?*@This() = null };
+        const Node = struct { next: ?*Node = null };
 
         fn echo(call: *zhtps.Call(@This())) zhtps.EndpointError!zhtps.http.Response {
             return call.json(.ok, try call.bodyJson(Node));
@@ -510,21 +401,13 @@ test "memory regression rejects deeply nested JSON input over HTTP" {
     );
     const bytes = try request(spec, wire);
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        bytes,
-        "HTTP/1.1 400",
-    ));
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        bytes,
-        "HTTP/1.1 200",
-    ) != null);
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "HTTP/1.1 400"));
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "HTTP/1.1 200") != null);
 }
 
 test "memory regression rejects deeply nested JSON output over HTTP" {
     const spec = struct {
-        const Node = struct { next: ?*@This() = null };
+        const Node = struct { next: ?*Node = null };
 
         fn respond(call: *zhtps.Call(@This())) zhtps.EndpointError!zhtps.http.Response {
             var nodes: [257]Node = @splat(.{});
@@ -536,11 +419,7 @@ test "memory regression rejects deeply nested JSON output over HTTP" {
     const bytes = try request(spec, "GET / HTTP/1.1\r\nHost: local\r\n" ++
         "Connection: close\r\n\r\n");
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        bytes,
-        "HTTP/1.1 500",
-    ));
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "HTTP/1.1 500"));
 }
 
 test "memory regression preserves handler scratch during cleanup over HTTP" {
@@ -555,11 +434,7 @@ test "memory regression preserves handler scratch during cleanup over HTTP" {
         }
         pub fn release(call: *C) void {
             _ = call.query("overwrite") catch return;
-            call.services.intact = std.mem.eql(
-                u8,
-                call.local.retained,
-                "retained",
-            );
+            call.services.intact = std.mem.eql(u8, call.local.retained, "retained");
         }
         pub const routes = .{zhtps.get("/", respond)};
     };
@@ -571,11 +446,7 @@ test "memory regression preserves handler scratch during cleanup over HTTP" {
             "Connection: close\r\n\r\n",
     );
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.endsWith(
-        u8,
-        bytes,
-        "retained",
-    ));
+    try std.testing.expect(std.mem.endsWith(u8, bytes, "retained"));
     try std.testing.expect(services.intact);
 }
 
@@ -610,21 +481,9 @@ test "memory regression retains allocator handles across hooks over HTTP" {
             _ = allocator.dupe(u8, "cleanup") catch return;
             _ = call.local.head_allocator.?.dupe(u8, "head cleanup") catch return;
             _ = call.query("overwrite") catch return;
-            call.services.intact = std.mem.eql(
-                u8,
-                call.local.head_bytes,
-                "head",
-            ) and
-                std.mem.eql(
-                    u8,
-                    call.local.handler_bytes,
-                    "handler",
-                ) and
-                std.mem.eql(
-                    u8,
-                    call.bodyBytes(),
-                    "body",
-                );
+            call.services.intact = std.mem.eql(u8, call.local.head_bytes, "head") and
+                std.mem.eql(u8, call.local.handler_bytes, "handler") and
+                std.mem.eql(u8, call.bodyBytes(), "body");
         }
         fn isHookLocal(allocator: std.mem.Allocator, call: *C) bool {
             const address = @intFromPtr(allocator.ptr);
@@ -648,16 +507,8 @@ test "memory regression retains allocator handles across hooks over HTTP" {
             "Content-Length: 4\r\nConnection: close\r\n\r\nbody",
     );
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        bytes,
-        "HTTP/1.1 200",
-    ));
-    try std.testing.expect(std.mem.endsWith(
-        u8,
-        bytes,
-        "body",
-    ));
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "HTTP/1.1 200"));
+    try std.testing.expect(std.mem.endsWith(u8, bytes, "body"));
     try std.testing.expect(services.intact);
 }
 
@@ -695,11 +546,7 @@ test "request scratch survives a running handler deadline and is reclaimed after
             _ = call.query("decode") catch return;
             // The allocator stored inside the managed list must outlive respond.
             list.appendSlice(" cleanup") catch return;
-            call.services.intact = std.mem.eql(
-                u8,
-                list.items,
-                "retained cleanup",
-            );
+            call.services.intact = std.mem.eql(u8, list.items, "retained cleanup");
             list.deinit();
         }
         pub const routes = .{zhtps.get("/", respond)};
@@ -718,7 +565,7 @@ test "request scratch survives a running handler deadline and is reclaimed after
 }
 
 const static_site = struct {
-    const C = zhtps.Call(@This());
+    const C = zhtps.Call(static_site);
     pub const Services = struct { directory: std.Io.Dir };
     pub const lanes = .{ .files = .{ .timeout_ms = 5000 } };
 
@@ -755,16 +602,8 @@ test "static files stream beyond scratch capacity and support HEAD and revalidat
             "GET /empty.txt HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
     );
     defer testing.allocator.free(result);
-    const head_end = std.mem.indexOf(
-        u8,
-        result,
-        "\r\n\r\n",
-    ).? + 4;
-    try testing.expect(std.mem.startsWith(
-        u8,
-        result[head_end..],
-        "HTTP/1.1 200",
-    ));
+    const head_end = std.mem.indexOf(u8, result, "\r\n\r\n").? + 4;
+    try testing.expect(std.mem.startsWith(u8, result[head_end..], "HTTP/1.1 200"));
     try testing.expect(std.mem.indexOf(
         u8,
         result[0..head_end],
@@ -780,44 +619,14 @@ test "static files stream beyond scratch capacity and support HEAD and revalidat
         result,
         "Cache-Control: public, max-age=60\r\n",
     ) != null);
-    const body_start = head_end + std.mem.indexOf(
-        u8,
-        result[head_end..],
-        "\r\n\r\n",
-    ).? + 4;
+    const body_start = head_end + std.mem.indexOf(u8, result[head_end..], "\r\n\r\n").? + 4;
     try testing.expectEqualStrings(payload, result[body_start..][0..payload.len]);
-    try testing.expect(std.mem.startsWith(
-        u8,
-        result[body_start + payload.len ..],
-        "HTTP/1.1 200",
-    ));
-    try testing.expect(std.mem.endsWith(
-        u8,
-        result,
-        "\r\n\r\n",
-    ));
-    const etag_start = std.mem.indexOf(
-        u8,
-        result,
-        "ETag: ",
-    ).? + 6;
-    const etag_end = std.mem.indexOfScalarPos(
-        u8,
-        result,
-        etag_start,
-        '\r',
-    ).?;
-    const date_start = std.mem.indexOf(
-        u8,
-        result,
-        "Last-Modified: ",
-    ).? + 15;
-    const date_end = std.mem.indexOfScalarPos(
-        u8,
-        result,
-        date_start,
-        '\r',
-    ).?;
+    try testing.expect(std.mem.startsWith(u8, result[body_start + payload.len ..], "HTTP/1.1 200"));
+    try testing.expect(std.mem.endsWith(u8, result, "\r\n\r\n"));
+    const etag_start = std.mem.indexOf(u8, result, "ETag: ").? + 6;
+    const etag_end = std.mem.indexOfScalarPos(u8, result, etag_start, '\r').?;
+    const date_start = std.mem.indexOf(u8, result, "Last-Modified: ").? + 15;
+    const date_end = std.mem.indexOfScalarPos(u8, result, date_start, '\r').?;
     const wire = try std.fmt.allocPrint(
         testing.allocator,
         "GET /large.bin HTTP/1.1\r\nHost: local\r\nIf-None-Match: {s}\r\n\r\n" ++
@@ -827,27 +636,11 @@ test "static files stream beyond scratch capacity and support HEAD and revalidat
         .{ result[etag_start..etag_end], result[date_start..date_end] },
     );
     defer testing.allocator.free(wire);
-    const conditional = try requestWithOptions(
-        static_site,
-        .{ .services = &services },
-        wire,
-    );
+    const conditional = try requestWithOptions(static_site, .{ .services = &services }, wire);
     defer testing.allocator.free(conditional);
-    try testing.expectEqual(@as(usize, 2), std.mem.count(
-        u8,
-        conditional,
-        "HTTP/1.1 304",
-    ));
-    try testing.expectEqual(@as(usize, 1), std.mem.count(
-        u8,
-        conditional,
-        "HTTP/1.1 412",
-    ));
-    try testing.expect(std.mem.indexOf(
-        u8,
-        conditional,
-        payload[0..32],
-    ) == null);
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, conditional, "HTTP/1.1 304"));
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, conditional, "HTTP/1.1 412"));
+    try testing.expect(std.mem.indexOf(u8, conditional, payload[0..32]) == null);
 }
 
 test "static files serve index pages encoded names and safe directory redirects" {
@@ -876,46 +669,18 @@ test "static files serve index pages encoded names and safe directory redirects"
         result,
         "Content-Type: text/html; charset=utf-8\r\n",
     ) != null);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "\r\n\r\n<h1>Home</h1>",
-    ) != null);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "HTTP/1.1 308",
-    ) != null);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "Location: /guide/?version=1\r\n",
-    ) != null);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "\r\n\r\n<h1>Guide</h1>",
-    ) != null);
+    try testing.expect(std.mem.indexOf(u8, result, "\r\n\r\n<h1>Home</h1>") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "HTTP/1.1 308") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Location: /guide/?version=1\r\n") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "\r\n\r\n<h1>Guide</h1>") != null);
     try testing.expect(std.mem.indexOf(
         u8,
         result,
         "Content-Type: text/css; charset=utf-8\r\n",
     ) != null);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "\r\n\r\nbody{}",
-    ) != null);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "\r\n\r\nonce",
-    ) != null);
-    try testing.expectEqual(@as(usize, 1), std.mem.count(
-        u8,
-        result,
-        "HTTP/1.1 404",
-    ));
+    try testing.expect(std.mem.indexOf(u8, result, "\r\n\r\nbody{}") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "\r\n\r\nonce") != null);
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, result, "HTTP/1.1 404"));
 }
 
 test "static files hide traversal symlinks dotfiles directories and special files" {
@@ -927,23 +692,9 @@ test "static files hide traversal symlinks dotfiles directories and special file
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "secret.txt", .data = "secret" });
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "private/key", .data = "secret" });
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "public/.env", .data = "hidden" });
-    try tmp.dir.symLink(
-        testing.io,
-        "../secret.txt",
-        "public/link",
-        .{},
-    );
-    try tmp.dir.symLink(
-        testing.io,
-        "../private",
-        "public/linked",
-        .{ .is_directory = true },
-    );
-    const directory = try tmp.dir.openDir(
-        testing.io,
-        "public",
-        .{},
-    );
+    try tmp.dir.symLink(testing.io, "../secret.txt", "public/link", .{});
+    try tmp.dir.symLink(testing.io, "../private", "public/linked", .{ .is_directory = true });
+    const directory = try tmp.dir.openDir(testing.io, "public", .{});
     defer directory.close(testing.io);
     try testing.expectEqual(std.os.linux.E.SUCCESS, std.os.linux.errno(std.os.linux.mknodat(
         directory.handle,
@@ -974,27 +725,11 @@ test "static files hide traversal symlinks dotfiles directories and special file
             .{path},
         );
         defer testing.allocator.free(wire);
-        const result = try requestWithOptions(
-            static_site,
-            .{ .services = &services },
-            wire,
-        );
+        const result = try requestWithOptions(static_site, .{ .services = &services }, wire);
         defer testing.allocator.free(result);
-        try testing.expect(std.mem.startsWith(
-            u8,
-            result,
-            "HTTP/1.1 404",
-        ));
-        try testing.expect(std.mem.indexOf(
-            u8,
-            result,
-            "secret",
-        ) == null);
-        try testing.expect(std.mem.indexOf(
-            u8,
-            result,
-            "hidden",
-        ) == null);
+        try testing.expect(std.mem.startsWith(u8, result, "HTTP/1.1 404"));
+        try testing.expect(std.mem.indexOf(u8, result, "secret") == null);
+        try testing.expect(std.mem.indexOf(u8, result, "hidden") == null);
     }
     const allowed = try requestWithOptions(
         static_site,
@@ -1002,11 +737,7 @@ test "static files hide traversal symlinks dotfiles directories and special file
         "GET /.env HTTP/1.1\r\nHost: local\r\nDotfiles: yes\r\nConnection: close\r\n\r\n",
     );
     defer testing.allocator.free(allowed);
-    try testing.expect(std.mem.endsWith(
-        u8,
-        allowed,
-        "\r\n\r\nhidden",
-    ));
+    try testing.expect(std.mem.endsWith(u8, allowed, "\r\n\r\nhidden"));
 }
 
 test "static directory mounts compose with groups middleware and explicit routes" {
@@ -1021,11 +752,7 @@ test "static directory mounts compose with groups middleware and explicit routes
             return null;
         }
         pub const routes = .{
-            zhtps.staticFiles(
-                @This(),
-                "/",
-                .{ .root = "../.." },
-            ),
+            zhtps.staticFiles(@This(), "/", .{ .root = "../.." }),
             zhtps.get("/README.md", explicit),
             zhtps.group(.{
                 .prefix = "/docs",
@@ -1046,44 +773,16 @@ test "static directory mounts compose with groups middleware and explicit routes
         "GET /docs/testing.md HTTP/1.1\r\nHost: local\r\nAuthorization: yes\r\n\r\n" ++
         "GET /docstesting.md HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
     defer std.testing.allocator.free(result);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "\r\n\r\nexplicit",
-    ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "HTTP/1.1 405",
-    ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "HTTP/1.1 403",
-    ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "HTTP/1.1 204",
-    ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "Allow: GET, HEAD, OPTIONS\r\n",
-    ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "Location: /docs/\r\n",
-    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "\r\n\r\nexplicit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "HTTP/1.1 405") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "HTTP/1.1 403") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "HTTP/1.1 204") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "Allow: GET, HEAD, OPTIONS\r\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "Location: /docs/\r\n") != null);
     try std.testing.expect(std.mem.indexOf(
         u8,
         result,
         "\r\n\r\n# Verification and load measurement",
     ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result,
-        "HTTP/1.1 404",
-    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "HTTP/1.1 404") != null);
 }

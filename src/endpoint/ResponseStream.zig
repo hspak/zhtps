@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const platform = @import("../platform.zig");
-const log = std.log.scoped(.response_stream);
 const ResponseStream = @This();
 
 /// Only the producer may access this writer. Its buffer is borrowed through
@@ -107,11 +106,7 @@ fn flushWriter(writer: *std.Io.Writer) std.Io.Writer.Error!void {
     };
 }
 
-fn drain(
-    writer: *std.Io.Writer,
-    data: []const []const u8,
-    splat: usize,
-) std.Io.Writer.Error!usize {
+fn drain(writer: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
     try flushWriter(writer);
     for (data, 0..) |bytes, index| {
         if (index == data.len - 1 and splat == 0) break;
@@ -127,11 +122,7 @@ fn drain(
 fn notify(stream: *ResponseStream) Error!void {
     const one: u64 = 1;
     while (true) {
-        const result = platform.linux.write(
-            stream.event_fd,
-            @ptrCast(&one),
-            @sizeOf(u64),
-        );
+        const result = platform.linux.write(stream.event_fd, @ptrCast(&one), @sizeOf(u64));
         switch (platform.linux.errno(result)) {
             .SUCCESS, .AGAIN => return,
             .INTR => continue,

@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const Atomic = std.atomic.Value(u64);
-const log = std.log.scoped(.metrics);
 const Metrics = @This();
 
 counters: [std.meta.fields(Counter).len]Atomic = @splat(.init(0)),
@@ -156,30 +155,13 @@ pub const Recorder = struct {
     metrics: *Metrics,
 
     /// All updates must run on the recorder's owning thread; snapshot readers may run concurrently.
-    pub fn add(
-        owned: Recorder,
-        counter: Counter,
-        amount: u64,
-    ) void {
-        increment(
-            &owned.metrics.counters[@intFromEnum(counter)],
-            amount,
-            false,
-        );
+    pub fn add(owned: Recorder, counter: Counter, amount: u64) void {
+        increment(&owned.metrics.counters[@intFromEnum(counter)], amount, false);
     }
 
     /// All updates must run on the recorder's owning thread; snapshot readers may run concurrently.
-    pub fn observe(
-        owned: Recorder,
-        histogram: Histogram,
-        nanoseconds: u64,
-    ) void {
-        record(
-            owned.metrics,
-            histogram,
-            nanoseconds,
-            false,
-        );
+    pub fn observe(owned: Recorder, histogram: Histogram, nanoseconds: u64) void {
+        record(owned.metrics, histogram, nanoseconds, false);
     }
 
     /// All updates must run on the recorder's owning thread; snapshot readers may run concurrently.
@@ -195,27 +177,15 @@ pub fn recorder(metrics: *Metrics) Recorder {
     return .{ .metrics = metrics };
 }
 
-fn increment(
-    destination: *Atomic,
-    amount: u64,
-    comptime concurrent: bool,
-) void {
+fn increment(destination: *Atomic, amount: u64, comptime concurrent: bool) void {
     if (comptime concurrent) {
         _ = destination.fetchAdd(amount, .monotonic);
     } else destination.store(destination.load(.monotonic) +% amount, .monotonic);
 }
 
 /// Atomically adds a count, wrapping on overflow. Supports concurrent writers.
-pub fn add(
-    metrics: *Metrics,
-    counter: Counter,
-    amount: u64,
-) void {
-    increment(
-        &metrics.counters[@intFromEnum(counter)],
-        amount,
-        true,
-    );
+pub fn add(metrics: *Metrics, counter: Counter, amount: u64) void {
+    increment(&metrics.counters[@intFromEnum(counter)], amount, true);
 }
 
 /// Reads the current count atomically without synchronizing unrelated memory.
@@ -224,26 +194,13 @@ pub fn get(metrics: *const Metrics, counter: Counter) u64 {
 }
 
 /// Publishes a gauge atomically. Concurrent writers replace, rather than combine, values.
-pub fn set(
-    metrics: *Metrics,
-    gauge: Gauge,
-    amount: u64,
-) void {
+pub fn set(metrics: *Metrics, gauge: Gauge, amount: u64) void {
     metrics.gauges[@intFromEnum(gauge)].store(amount, .monotonic);
 }
 
 /// Atomically records a duration and its bucket; snapshots may see the two updates separately.
-pub fn observe(
-    metrics: *Metrics,
-    histogram: Histogram,
-    nanoseconds: u64,
-) void {
-    record(
-        metrics,
-        histogram,
-        nanoseconds,
-        true,
-    );
+pub fn observe(metrics: *Metrics, histogram: Histogram, nanoseconds: u64) void {
+    record(metrics, histogram, nanoseconds, true);
 }
 
 fn record(
@@ -255,16 +212,8 @@ fn record(
     const distribution = &metrics.latency[@intFromEnum(histogram)];
     var bucket: usize = 0;
     while (bucket < bounds_ns.len and nanoseconds > bounds_ns[bucket]) : (bucket += 1) {}
-    increment(
-        &distribution.buckets[bucket],
-        1,
-        concurrent,
-    );
-    increment(
-        &distribution.sum_ns,
-        nanoseconds,
-        concurrent,
-    );
+    increment(&distribution.buckets[bucket], 1, concurrent);
+    increment(&distribution.sum_ns, nanoseconds, concurrent);
 }
 
 /// Records one response in its status class. Assumes status is between 100 and 599.
@@ -404,11 +353,7 @@ test "single writer recorder permits concurrent snapshot readers" {
     };
     var metrics: Metrics = .{};
     var done: std.atomic.Value(bool) = .init(false);
-    const thread = try std.Thread.spawn(
-        .{},
-        producer.run,
-        .{ &metrics, &done },
-    );
+    const thread = try std.Thread.spawn(.{}, producer.run, .{ &metrics, &done });
     defer thread.join();
     var previous: u64 = 0;
     while (!done.load(.acquire)) {

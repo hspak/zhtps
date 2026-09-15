@@ -4,7 +4,6 @@ const std = @import("std");
 const zeit = @import("zeit");
 const http = @import("../http.zig");
 const syntax = @import("syntax.zig");
-const log = std.log.scoped(.http_response);
 const Response = @This();
 
 status: u16 = 200,
@@ -47,11 +46,7 @@ pub const Encoder = struct {
     },
     close: bool,
     /// Encodes one body fragment. HEAD and bodyless statuses suppress payload.
-    pub fn write(
-        encoder: *Encoder,
-        writer: *std.Io.Writer,
-        bytes: []const u8,
-    ) Error!void {
+    pub fn write(encoder: *Encoder, writer: *std.Io.Writer, bytes: []const u8) Error!void {
         switch (encoder.mode) {
             .fixed => |remaining| {
                 if (bytes.len > remaining) return error.LengthMismatch;
@@ -89,18 +84,11 @@ pub const Encoder = struct {
 /// The application supplies fields required by its status and representation
 /// (for example Allow for 405 and WWW-Authenticate for 401), and valid semantic
 /// field values. This layer validates field syntax and owns transport framing.
-pub fn framing(
-    response: Response,
-    request: *const http.Request,
-) ValidationError!Framing {
+pub fn framing(response: Response, request: *const http.Request) ValidationError!Framing {
     if (response.status < 100 or response.status > 599 or response.status == 101)
         return error.InvalidStatus;
     if (request.version == .http_1_0 and response.status < 200) return error.InvalidStatus;
-    const connect = std.mem.eql(
-        u8,
-        request.method,
-        "CONNECT",
-    );
+    const connect = std.mem.eql(u8, request.method, "CONNECT");
     if (connect and response.status >= 200 and response.status < 300) return error.InvalidStatus;
     for (response.headers) |field| {
         if (!syntax.isToken(field.name) or !syntax.isField(field.value)) return error.InvalidHeader;
@@ -123,11 +111,7 @@ pub fn framing(
         (length == null or length.? != 0)) return error.InvalidBody;
     return .{
         .content_length = if (prohibited_framing) null else length,
-        .suppressed = no_body or std.mem.eql(
-            u8,
-            request.method,
-            "HEAD",
-        ),
+        .suppressed = no_body or std.mem.eql(u8, request.method, "HEAD"),
     };
 }
 
@@ -199,11 +183,7 @@ pub fn write(
         .bytes => |bytes| bytes,
         .stream => return error.StreamRequiresEncoder,
     };
-    var encoder = try response.begin(
-        writer,
-        request,
-        date,
-    );
+    var encoder = try response.begin(writer, request, date);
     try encoder.write(writer, bytes);
     try encoder.end(writer);
     return encoder.close;
@@ -291,31 +271,15 @@ test "HEAD carries representation length without body and 204 has no framing fie
     var date: [29]u8 = undefined;
     formatDate(0, &date);
     const response: Response = .{ .body = .{ .bytes = "hello" } };
-    _ = try response.write(
-        &writer,
-        &.{ .method = "HEAD" },
-        &date,
-    );
+    _ = try response.write(&writer, &.{ .method = "HEAD" }, &date);
     try testing.expectEqualStrings(
         "HTTP/1.1 200 OK\r\nDate: Thu, 01 Jan 1970 00:00:00 GMT\r\nContent-Length: 5\r\n\r\n",
         writer.buffered(),
     );
     writer = .fixed(&buffer);
-    _ = try (Response{ .status = 204 }).write(
-        &writer,
-        &.{ .method = "GET" },
-        &date,
-    );
-    try testing.expect(std.mem.indexOf(
-        u8,
-        writer.buffered(),
-        "Content-Length",
-    ) == null);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        writer.buffered(),
-        "Transfer-Encoding",
-    ) == null);
+    _ = try (Response{ .status = 204 }).write(&writer, &.{ .method = "GET" }, &date);
+    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Content-Length") == null);
+    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Transfer-Encoding") == null);
 }
 
 test "streaming uses chunks in HTTP 1.1 and closure in HTTP 1.0" {
@@ -324,39 +288,19 @@ test "streaming uses chunks in HTTP 1.1 and closure in HTTP 1.0" {
     var writer: std.Io.Writer = .fixed(&buffer);
     const date = "Thu, 01 Jan 1970 00:00:00 GMT";
     const response: Response = .{ .body = .{ .stream = null } };
-    var encoder = try response.begin(
-        &writer,
-        &.{ .method = "GET" },
-        date,
-    );
+    var encoder = try response.begin(&writer, &.{ .method = "GET" }, date);
     try encoder.write(&writer, "abc");
     try encoder.write(&writer, "");
     try encoder.end(&writer);
-    try testing.expect(std.mem.endsWith(
-        u8,
-        writer.buffered(),
-        "\r\n\r\n3\r\nabc\r\n0\r\n\r\n",
-    ));
+    try testing.expect(std.mem.endsWith(u8, writer.buffered(), "\r\n\r\n3\r\nabc\r\n0\r\n\r\n"));
     try testing.expect(!encoder.close);
     writer = .fixed(&buffer);
-    encoder = try response.begin(
-        &writer,
-        &.{ .method = "GET", .version = .http_1_0 },
-        date,
-    );
+    encoder = try response.begin(&writer, &.{ .method = "GET", .version = .http_1_0 }, date);
     try encoder.write(&writer, "abc");
     try encoder.end(&writer);
     try testing.expect(encoder.close);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        writer.buffered(),
-        "Transfer-Encoding",
-    ) == null);
-    try testing.expect(std.mem.endsWith(
-        u8,
-        writer.buffered(),
-        "\r\n\r\nabc",
-    ));
+    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Transfer-Encoding") == null);
+    try testing.expect(std.mem.endsWith(u8, writer.buffered(), "\r\n\r\nabc"));
 }
 
 test "response rejects header injection before writing and enforces declared lengths" {
@@ -364,17 +308,9 @@ test "response rejects header injection before writing and enforces declared len
     var writer: std.Io.Writer = .fixed(&buffer);
     const date = "Thu, 01 Jan 1970 00:00:00 GMT";
     const response: Response = .{ .headers = &.{.{ .name = "X-Test", .value = "a\r\nInjected: yes" }} };
-    try std.testing.expectError(error.InvalidHeader, response.begin(
-        &writer,
-        &.{},
-        date,
-    ));
+    try std.testing.expectError(error.InvalidHeader, response.begin(&writer, &.{}, date));
     try std.testing.expectEqual(@as(usize, 0), writer.buffered().len);
-    var encoder = try (Response{ .body = .{ .stream = 3 } }).begin(
-        &writer,
-        &.{},
-        date,
-    );
+    var encoder = try (Response{ .body = .{ .stream = 3 } }).begin(&writer, &.{}, date);
     try encoder.write(&writer, "ab");
     try std.testing.expectError(error.LengthMismatch, encoder.end(&writer));
     try std.testing.expectError(error.LengthMismatch, encoder.write(&writer, "cd"));
@@ -398,21 +334,9 @@ test "RFC informational responses reject HTTP 1.0 before writing" {
         try testing.expectEqual(@as(usize, 0), writer.buffered().len);
     }
     var writer: std.Io.Writer = .fixed(&buffer);
-    _ = try (Response{ .status = 103 }).write(
-        &writer,
-        &.{ .method = "GET" },
-        date,
-    );
-    try testing.expect(std.mem.startsWith(
-        u8,
-        writer.buffered(),
-        "HTTP/1.1 103 Early Hints\r\n",
-    ));
-    try testing.expect(std.mem.indexOf(
-        u8,
-        writer.buffered(),
-        "Content-Length",
-    ) == null);
+    _ = try (Response{ .status = 103 }).write(&writer, &.{ .method = "GET" }, date);
+    try testing.expect(std.mem.startsWith(u8, writer.buffered(), "HTTP/1.1 103 Early Hints\r\n"));
+    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Content-Length") == null);
 }
 
 test "HTTP Date formatting uses UTC across leap centuries and the year limit" {

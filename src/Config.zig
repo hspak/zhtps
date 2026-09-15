@@ -3,7 +3,6 @@
 const std = @import("std");
 const Admission = @import("Admission.zig");
 pub const Resources = @import("Config/Resources.zig");
-const log = std.log.scoped(.config);
 const Config = @This();
 
 address: []const u8 = "127.0.0.1",
@@ -159,16 +158,8 @@ pub fn validate(config: Config) Error!void {
         config.http2.memory_bytes < 1024 * 1024) return error.InvalidLimit;
     if (config.tls) |tls| {
         if (tls.certificate.len == 0 or tls.private_key.len == 0 or
-            std.mem.indexOfScalar(
-                u8,
-                tls.certificate,
-                0,
-            ) != null or
-            std.mem.indexOfScalar(
-                u8,
-                tls.private_key,
-                0,
-            ) != null or
+            std.mem.indexOfScalar(u8, tls.certificate, 0) != null or
+            std.mem.indexOfScalar(u8, tls.private_key, 0) != null or
             tls.handshake_timeout_ms == 0) return error.InvalidOption;
     }
     if (config.workers == 0 or (config.workers != automatic and config.workers > 256) or
@@ -211,17 +202,9 @@ pub fn resolveWorkerCpus(config: Config, cpus: *[256]u16) Error![]const u16 {
     if (config.worker_cpus.len == 0 or std.mem.eql(u8, config.worker_cpus, "inherit")) return cpus[0..0];
     var count: usize = 0;
     var seen = std.StaticBitSet(1024).initEmpty();
-    var parts = std.mem.splitScalar(
-        u8,
-        config.worker_cpus,
-        ',',
-    );
+    var parts = std.mem.splitScalar(u8, config.worker_cpus, ',');
     while (parts.next()) |part| {
-        var range = std.mem.splitScalar(
-            u8,
-            part,
-            '-',
-        );
+        var range = std.mem.splitScalar(u8, part, '-');
         const first = try parseCpu(range.next().?);
         const last = if (range.next()) |end| try parseCpu(end) else first;
         if (range.next() != null or last < first) return error.InvalidOption;
@@ -239,11 +222,7 @@ pub fn resolveWorkerCpus(config: Config, cpus: *[256]u16) Error![]const u16 {
 fn parseCpu(text: []const u8) Error!usize {
     if (text.len == 0) return error.InvalidOption;
     for (text) |byte| if (!std.ascii.isDigit(byte)) return error.InvalidOption;
-    const cpu = std.fmt.parseInt(
-        usize,
-        text,
-        10,
-    ) catch return error.InvalidOption;
+    const cpu = std.fmt.parseInt(usize, text, 10) catch return error.InvalidOption;
     if (cpu >= 1024) return error.InvalidOption;
     return cpu;
 }
@@ -427,19 +406,11 @@ pub fn parse(args: []const []const u8) Error!Config {
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
-        if (std.mem.eql(
-            u8,
-            arg,
-            "--verbose",
-        )) {
+        if (std.mem.eql(u8, arg, "--verbose")) {
             config.verbose = true;
             continue;
         }
-        if (std.mem.eql(
-            u8,
-            arg,
-            "--no-access-log",
-        )) {
+        if (std.mem.eql(u8, arg, "--no-access-log")) {
             config.access_log = false;
             continue;
         }
@@ -469,251 +440,87 @@ pub fn parse(args: []const []const u8) Error!Config {
             } else if (std.mem.eql(u8, arg, "--http2-worker-streams")) {
                 config.http2.max_streams_per_worker = automatic;
             } else return error.InvalidOption;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--address",
-        )) {
+        } else if (std.mem.eql(u8, arg, "--address")) {
             config.address = value;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--tls-certificate",
-        )) {
+        } else if (std.mem.eql(u8, arg, "--tls-certificate")) {
             if (config.tls == null) config.tls = .{};
             config.tls.?.certificate = value;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--tls-key",
-        )) {
+        } else if (std.mem.eql(u8, arg, "--tls-key")) {
             if (config.tls == null) config.tls = .{};
             config.tls.?.private_key = value;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--tls-handshake-timeout-ms",
-        )) {
+        } else if (std.mem.eql(u8, arg, "--tls-handshake-timeout-ms")) {
             if (config.tls == null) config.tls = .{};
-            config.tls.?.handshake_timeout_ms = std.fmt.parseInt(
-                u32,
-                value,
-                10,
-            ) catch
+            config.tls.?.handshake_timeout_ms = std.fmt.parseInt(u32, value, 10) catch
                 return error.InvalidOption;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--admin-address",
-        )) {
+        } else if (std.mem.eql(u8, arg, "--admin-address")) {
             config.admin_address = value;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--worker-cpus",
-        )) {
+        } else if (std.mem.eql(u8, arg, "--worker-cpus")) {
             if (value.len == 0) return error.InvalidOption;
             config.worker_cpus = value;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--port",
-        )) {
-            config.port = std.fmt.parseInt(
-                u16,
-                value,
-                10,
-            ) catch return error.InvalidOption;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--admin-port",
-        )) {
-            config.admin_port = std.fmt.parseInt(
-                u16,
-                value,
-                10,
-            ) catch return error.InvalidOption;
-        } else if (std.mem.eql(
-            u8,
-            arg,
-            "--tcp-retries",
-        )) {
-            config.tcp_retries = if (std.mem.eql(
-                u8,
-                value,
-                "system",
-            ))
+        } else if (std.mem.eql(u8, arg, "--port")) {
+            config.port = std.fmt.parseInt(u16, value, 10) catch return error.InvalidOption;
+        } else if (std.mem.eql(u8, arg, "--admin-port")) {
+            config.admin_port = std.fmt.parseInt(u16, value, 10) catch return error.InvalidOption;
+        } else if (std.mem.eql(u8, arg, "--tcp-retries")) {
+            config.tcp_retries = if (std.mem.eql(u8, value, "system"))
                 .system
-            else if (std.mem.eql(
-                u8,
-                value,
-                "thin-linear",
-            ))
+            else if (std.mem.eql(u8, value, "thin-linear"))
                 .thin_linear
             else
                 return error.InvalidOption;
         } else {
-            const number = std.fmt.parseInt(
-                u32,
-                value,
-                10,
-            ) catch return error.InvalidOption;
-            if (std.mem.eql(
-                u8,
-                arg,
-                "--workers",
-            )) {
+            const number = std.fmt.parseInt(u32, value, 10) catch return error.InvalidOption;
+            if (std.mem.eql(u8, arg, "--workers")) {
                 config.workers = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--http2-max-streams",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--http2-max-streams")) {
                 config.http2.max_streams = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--http2-worker-streams",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--http2-worker-streams")) {
                 config.http2.max_streams_per_worker = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--http2-memory-bytes",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--http2-memory-bytes")) {
                 config.http2.memory_bytes = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--max-connections",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--max-connections")) {
                 config.max_connections = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--admin-connections",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--admin-connections")) {
                 config.admin_connections = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--log-slots",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--log-slots")) {
                 config.log_slots = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--completion-budget",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--completion-budget")) {
                 config.completion_budget = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--response-batches",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--response-batches")) {
                 config.response_batches = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--large-buffer-bytes",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--large-buffer-bytes")) {
                 config.large_buffer_bytes = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--max-active",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--max-active")) {
                 config.admission.max_active = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--max-rejecting",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--max-rejecting")) {
                 config.admission.max_rejecting = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--rate",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--rate")) {
                 config.admission.requests_per_second = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--burst",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--burst")) {
                 config.admission.burst = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--rejection-rate",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--rejection-rate")) {
                 config.admission.rejections_per_second = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--header-timeout-ms",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--header-timeout-ms")) {
                 config.header_timeout_ms = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--body-timeout-ms",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--body-timeout-ms")) {
                 config.body_timeout_ms = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--write-timeout-ms",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--write-timeout-ms")) {
                 config.write_timeout_ms = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--idle-timeout-ms",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--idle-timeout-ms")) {
                 config.idle_timeout_ms = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--idle-reclaim-ms",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--idle-reclaim-ms")) {
                 config.idle_reclaim_ms = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--shutdown-timeout-ms",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--shutdown-timeout-ms")) {
                 config.shutdown_timeout_ms = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--shutdown-keepalive-ms",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--shutdown-keepalive-ms")) {
                 config.shutdown_keepalive_ms = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--close-timeout-ms",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--close-timeout-ms")) {
                 config.close_timeout_ms = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--max-body-bytes",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--max-body-bytes")) {
                 config.max_body_bytes = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--max-chunk-framing-bytes",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--max-chunk-framing-bytes")) {
                 config.max_chunk_framing_bytes = number;
-            } else if (std.mem.eql(
-                u8,
-                arg,
-                "--max-requests",
-            )) {
+            } else if (std.mem.eql(u8, arg, "--max-requests")) {
                 config.max_requests_per_connection = number;
             } else return error.InvalidOption;
         }
@@ -892,7 +699,9 @@ test "TCP retry parsing preserves the selected policy through resolution" {
         .thin_linear,
         (try parse(&.{ "--tcp-retries", "thin-linear" })).tcp_retries,
     );
-    const config = try parse(&.{ "--tcp-retries", "system", "--max-connections", "256" });
+    const config = try parse(&.{
+        "--tcp-retries", "system", "--max-connections", "256",
+    });
     try testing.expectEqual(.system, (try config.resolve()).tcp_retries);
     try testing.expectError(error.InvalidOption, parse(&.{ "--tcp-retries", "unknown" }));
     try testing.expectError(error.MissingArgument, parse(&.{"--tcp-retries"}));
@@ -942,7 +751,9 @@ test "worker CPU mapping preserves order and validates ranges and cardinality" {
         try config.resolveWorkerCpus(&storage),
     );
     try testing.expectEqual(@as(usize, 0), (try (Config{}).resolveWorkerCpus(&storage)).len);
-    try testing.expectError(error.InvalidLimit, parse(&.{ "--worker-cpus", "2-3", "--workers", "1" }));
+    try testing.expectError(error.InvalidLimit, parse(&.{
+        "--worker-cpus", "2-3", "--workers", "1",
+    }));
     for ([_][]const u8{
         "",
         "2,",

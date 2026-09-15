@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const zeit = @import("zeit");
-const log = std.log.scoped(.http_date);
 
 /// Returns Unix seconds, or null for invalid syntax or calendar dates. Leap
 /// seconds map to the following Unix second. `now` resolves RFC 850 years;
@@ -15,11 +14,7 @@ pub fn parse(bytes: []const u8, now: u64) ?i64 {
     var weekday: zeit.Weekday = undefined;
     var time: zeit.Time = undefined;
     if (bytes.len == 29 and bytes[3] == ',') {
-        if (!std.mem.eql(
-            u8,
-            bytes[3..5],
-            ", ",
-        ) or bytes[7] != ' ' or
+        if (!std.mem.eql(u8, bytes[3..5], ", ") or bytes[7] != ' ' or
             bytes[11] != ' ' or bytes[16] != ' ' or !std.mem.eql(
             u8,
             bytes[25..],
@@ -38,19 +33,11 @@ pub fn parse(bytes: []const u8, now: u64) ?i64 {
         year = number(bytes[20..24]) orelse return null;
         time = parseTime(bytes[11..19]) orelse return null;
     } else {
-        const comma = std.mem.indexOfScalar(
-            u8,
-            bytes,
-            ',',
-        ) orelse return null;
+        const comma = std.mem.indexOfScalar(u8, bytes, ',') orelse return null;
         weekday = parseWeekday(bytes[0..comma], true) orelse return null;
         const rest = bytes[comma..];
         if (rest.len != 24 or rest[1] != ' ' or rest[4] != '-' or rest[8] != '-' or
-            rest[11] != ' ' or !std.mem.eql(
-            u8,
-            rest[20..],
-            " GMT",
-        )) return null;
+            rest[11] != ' ' or !std.mem.eql(u8, rest[20..], " GMT")) return null;
         day = number(rest[2..4]) orelse return null;
         month = parseMonth(rest[5..8]) orelse return null;
         const short_year = number(rest[9..11]) orelse return null;
@@ -77,11 +64,7 @@ pub fn parse(bytes: []const u8, now: u64) ?i64 {
             current.minute,
             current.second,
         };
-        if (std.mem.order(
-            u16,
-            &candidate,
-            &cutoff,
-        ) == .gt) year -= 100;
+        if (std.mem.order(u16, &candidate, &cutoff) == .gt) year -= 100;
     }
     if (year < 1601 or year > 9999 or day < 1 or day > month.lastDay(year)) return null;
     time.year = year;
@@ -98,20 +81,12 @@ pub fn parse(bytes: []const u8, now: u64) ?i64 {
 
 fn number(bytes: []const u8) ?u16 {
     for (bytes) |byte| if (!std.ascii.isDigit(byte)) return null;
-    return std.fmt.parseInt(
-        u16,
-        bytes,
-        10,
-    ) catch null;
+    return std.fmt.parseInt(u16, bytes, 10) catch null;
 }
 
 fn parseMonth(bytes: []const u8) ?zeit.Month {
     inline for (std.meta.tags(zeit.Month)) |month| {
-        if (std.mem.eql(
-            u8,
-            month.shortName(),
-            bytes,
-        )) return month;
+        if (std.mem.eql(u8, month.shortName(), bytes)) return month;
     }
     return null;
 }

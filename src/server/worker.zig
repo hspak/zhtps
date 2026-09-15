@@ -15,7 +15,6 @@ const ResponseBatch = @import("ResponseBatch.zig");
 const BufferPool = @import("BufferPool.zig");
 const http2 = @import("http2.zig");
 const Http2Allocator = @import("Http2Allocator.zig");
-const log = std.log.scoped(.server_worker);
 
 pub const RunError = std.mem.Allocator.Error ||
     std.Thread.SpawnError || platform.Error || Config.Error || Config.Resources.Error || Tls.Error ||
@@ -27,18 +26,9 @@ pub const RunError = std.mem.Allocator.Error ||
 
 // The built-in service accepts any syntactically valid authority. An omitted
 // HTTP/1.0 authority or empty Host uses this listener-specific default origin.
-fn defaultAuthority(
-    buffer: *[64]u8,
-    address: []const u8,
-    port: u16,
-    default_port: u16,
-) []const u8 {
+fn defaultAuthority(buffer: *[64]u8, address: []const u8, port: u16, default_port: u16) []const u8 {
     var writer: std.Io.Writer = .fixed(buffer);
-    if (std.mem.indexOfScalar(
-        u8,
-        address,
-        ':',
-    ) != null) {
+    if (std.mem.indexOfScalar(u8, address, ':') != null) {
         writer.print("[{s}]", .{address}) catch unreachable;
     } else writer.writeAll(address) catch unreachable;
     if (port != default_port) writer.print(":{d}", .{port}) catch unreachable;
@@ -54,12 +44,7 @@ fn cancelSync(ring: *linux.IoUring, user_data: u64) error{IoUringOperationUnsupp
         .pad = @splat(0),
     };
     while (true) {
-        const result = linux.io_uring_register(
-            ring.fd,
-            .REGISTER_SYNC_CANCEL,
-            &registration,
-            1,
-        );
+        const result = linux.io_uring_register(ring.fd, .REGISTER_SYNC_CANCEL, &registration, 1);
         switch (linux.errno(result)) {
             .SUCCESS, .NOENT => return,
             .INTR => continue,
@@ -96,41 +81,6 @@ pub fn Worker(comptime App: type) type {
         // send completion. Their storage must not be reset after merely copying.
         const can_batch = App == application;
         const Http2 = http2.Connection(App, Self);
-
-        /// Estimates transport-owned storage for startup sizing. Compiled record
-        /// sizes and bounded caches are exact; stack, socket, and TLS headroom
-        /// are allowances. Application-owned allocations remain outside this model.
-        pub fn resourceRequirements(config: Config) Config.Requirements {
-            const completion_bytes = if (isolated_application) @sizeOf(ApplicationExecutor.Completion) else 0;
-            var requirements: Config.Requirements = .{
-                .worker_bytes = @sizeOf(Self) + 1024 * 1024 + 64 * 1024 +
-                    64 * (@sizeOf(Request) + storageSize(config, false) + @sizeOf(BufferPool.Block)),
-                .connection_bytes = @sizeOf(Connection) + @sizeOf(Request) + @sizeOf(usize) +
-                    storageSize(config, false) + @sizeOf(BufferPool.Block) + completion_bytes +
-                    256 + 64 * 1024 + @as(u64, if (config.tls != null) 64 * 1024 else 0),
-                .admin_bytes = config.admin_connections *| (storageSize(config, true) +
-                    @sizeOf(Connection) + @sizeOf(Request) + @sizeOf(usize) + 64 * 1024),
-                .stream_bytes = @sizeOf(Http2.Stream) + config.application_bytes +
-                    config.header_bytes + config.trailer_bytes + config.response_bytes + 16 * 1024,
-                .stream_queue_bytes = completion_bytes,
-                .worker_fds = if (isolated_application) 4 else 3,
-            };
-            if (config.log_fd != null) requirements.worker_bytes +|= config.log_slots *| @sizeOf(Logger.Slot);
-            if (can_batch) requirements.worker_bytes +|= config.response_batches *| @sizeOf(ResponseBatch);
-            for (fullCapacities(config)) |size| {
-                const cached = @max(8, @min(64, 4 * 1024 * 1024 / size));
-                requirements.worker_bytes +|= cached *| (size + @sizeOf(BufferPool.Block));
-            }
-            if (comptime isolated_application) {
-                inline for (std.meta.tags(ApplicationLane)) |lane| {
-                    const options = App.laneOptions(lane);
-                    requirements.lane_threads +|= options.threads;
-                    requirements.worker_bytes +|= options.queue *| @sizeOf(ApplicationExecutor.Task);
-                    requirements.worker_bytes +|= options.threads *| (1024 * 1024 + @sizeOf(std.Thread));
-                }
-            }
-            return requirements;
-        }
 
         config: Config,
         io: std.Io,
@@ -447,17 +397,9 @@ pub fn Worker(comptime App: type) type {
                     const lane_options = App.laneOptions(lane);
                     if (lane_options.threads == 0 or lane_options.queue == 0 or lane_options.timeout_ms == 0)
                         return error.InvalidLimit;
-                    task_count = std.math.add(
-                        usize,
-                        task_count,
-                        lane_options.queue,
-                    ) catch
+                    task_count = std.math.add(usize, task_count, lane_options.queue) catch
                         return error.InvalidLimit;
-                    thread_count = std.math.add(
-                        usize,
-                        thread_count,
-                        lane_options.threads,
-                    ) catch
+                    thread_count = std.math.add(usize, thread_count, lane_options.threads) catch
                         return error.InvalidLimit;
                 }
                 task_count = std.math.mul(
@@ -528,11 +470,7 @@ pub fn Worker(comptime App: type) type {
                 executor.started = 0;
             }
 
-            fn submit(
-                executor: *ApplicationExecutor,
-                lane_id: ApplicationLane,
-                task: Task,
-            ) bool {
+            fn submit(executor: *ApplicationExecutor, lane_id: ApplicationLane, task: Task) bool {
                 const lane = &executor.lanes[@intFromEnum(lane_id)];
                 lane.mutex.lockUncancelable(executor.io);
                 defer lane.mutex.unlock(executor.io);
@@ -662,20 +600,47 @@ pub fn Worker(comptime App: type) type {
             }
         };
 
-        fn token(
-            kind: Kind,
-            index: usize,
-            generation: u32,
-        ) u64 {
+        /// Estimates transport-owned storage for startup sizing. Compiled record
+        /// sizes and bounded caches are exact; stack, socket, and TLS headroom
+        /// are allowances. Application-owned allocations remain outside this model.
+        pub fn resourceRequirements(config: Config) Config.Requirements {
+            const completion_bytes = if (comptime isolated_application) @sizeOf(ApplicationExecutor.Completion) else 0;
+            var requirements: Config.Requirements = .{
+                .worker_bytes = @sizeOf(Self) + 1024 * 1024 + 64 * 1024 +
+                    64 * (@sizeOf(Request) + storageSize(config, false) + @sizeOf(BufferPool.Block)),
+                .connection_bytes = @sizeOf(Connection) + @sizeOf(Request) + @sizeOf(usize) +
+                    storageSize(config, false) + @sizeOf(BufferPool.Block) + completion_bytes +
+                    256 + 64 * 1024 + @as(u64, if (config.tls != null) 64 * 1024 else 0),
+                .admin_bytes = config.admin_connections *| (storageSize(config, true) +
+                    @sizeOf(Connection) + @sizeOf(Request) + @sizeOf(usize) + 64 * 1024),
+                .stream_bytes = @sizeOf(Http2.Stream) + config.application_bytes +
+                    config.header_bytes + config.trailer_bytes + config.response_bytes + 16 * 1024,
+                .stream_queue_bytes = completion_bytes,
+                .worker_fds = if (isolated_application) 4 else 3,
+            };
+            if (config.log_fd != null) requirements.worker_bytes +|= config.log_slots *| @sizeOf(Logger.Slot);
+            if (comptime can_batch) requirements.worker_bytes +|= config.response_batches *| @sizeOf(ResponseBatch);
+            for (fullCapacities(config)) |size| {
+                const cached = @max(8, @min(64, 4 * 1024 * 1024 / size));
+                requirements.worker_bytes +|= cached *| (size + @sizeOf(BufferPool.Block));
+            }
+            if (comptime isolated_application) {
+                inline for (std.meta.tags(ApplicationLane)) |lane| {
+                    const options = App.laneOptions(lane);
+                    requirements.lane_threads +|= options.threads;
+                    requirements.worker_bytes +|= options.queue *| @sizeOf(ApplicationExecutor.Task);
+                    requirements.worker_bytes +|= options.threads *| (1024 * 1024 + @sizeOf(std.Thread));
+                }
+            }
+            return requirements;
+        }
+
+        fn token(kind: Kind, index: usize, generation: u32) u64 {
             return (@as(u64, generation) << 32) | (@as(u64, index) << 8) | @intFromEnum(kind);
         }
 
         fn control(kind: Kind) u64 {
-            return token(
-                kind,
-                0,
-                0,
-            );
+            return token(kind, 0, 0);
         }
 
         /// Starts the shared lane pool before any transport thread is pinned.
@@ -814,8 +779,6 @@ pub fn Worker(comptime App: type) type {
 
         /// Allocates owned ring, listeners, and buffers. Borrows config strings,
         /// io, stop, and shared until deinit; self must stay at a stable address.
-        /// Allocates owned ring, listeners, and buffers. Borrows config strings,
-        /// io, stop, and shared until deinit; self must stay at a stable address.
         /// Releases acquired resources on error without invoking application hooks.
         pub fn init(
             self: *Self,
@@ -825,12 +788,7 @@ pub fn Worker(comptime App: type) type {
         ) RunError!void {
             if (comptime RuntimeInit != void)
                 @compileError("this application requires initApplication with its runtime value");
-            return self.initApplication(
-                gpa,
-                io,
-                options,
-                {},
-            );
+            return self.initApplication(gpa, io, options, {});
         }
 
         /// Allocates owned ring, listeners, and buffers. Borrows config strings,
@@ -860,10 +818,7 @@ pub fn Worker(comptime App: type) type {
             params.flags = linux.IORING_SETUP_CQSIZE | linux.IORING_SETUP_COOP_TASKRUN;
             params.cq_entries = @intCast(entries);
             var ring = linux.IoUring.init_params(
-                @intCast(@min(
-                    entries,
-                    256,
-                )),
+                @intCast(@min(entries, 256)),
                 &params,
             ) catch |err| switch (err) {
                 error.SystemResources,
@@ -891,11 +846,7 @@ pub fn Worker(comptime App: type) type {
             );
             errdefer if (!transferred) platform.close(listener.fd);
             const admin_listener = if (worker_id == 0 and config.admin_connections > 0)
-                try platform.listen(
-                    config.admin_address,
-                    config.admin_port,
-                    .{ .backlog = 32 },
-                )
+                try platform.listen(config.admin_address, config.admin_port, .{ .backlog = 32 })
             else
                 platform.Listener{ .fd = -1, .port = config.admin_port };
             errdefer if (!transferred and admin_listener.fd >= 0) platform.close(admin_listener.fd);
@@ -984,11 +935,7 @@ pub fn Worker(comptime App: type) type {
                     admin_listener.port,
                     80,
                 ).len;
-            self.logger.init(
-                log_slots,
-                &self.metrics,
-                config.verbose,
-            );
+            self.logger.init(log_slots, &self.metrics, config.verbose);
             self.logger.worker = worker_id;
             self.logger.enabled = config.log_fd != null;
             self.admission.init(admission_options, platform.monotonicNs());
@@ -1120,11 +1067,7 @@ pub fn Worker(comptime App: type) type {
             return size;
         }
 
-        fn smallBuffer(
-            self: *const Self,
-            connection: *const Connection,
-            kind: Buffer,
-        ) []u8 {
+        fn smallBuffer(self: *const Self, connection: *const Connection, kind: Buffer) []u8 {
             var offset: usize = 0;
             for (
                 fullCapacities(self.config),
@@ -1229,11 +1172,7 @@ pub fn Worker(comptime App: type) type {
             self.updateBufferMetrics();
         }
 
-        fn ensureBuffer(
-            self: *Self,
-            connection: *Connection,
-            kind: Buffer,
-        ) bool {
+        fn ensureBuffer(self: *Self, connection: *Connection, kind: Buffer) bool {
             const index = @intFromEnum(kind);
             const pool = &self.buffer_pools[index];
             const destination = bufferSlice(connection, kind);
@@ -1271,11 +1210,7 @@ pub fn Worker(comptime App: type) type {
             return true;
         }
 
-        fn releaseBuffers(
-            self: *Self,
-            connection: *Connection,
-            closing: bool,
-        ) void {
+        fn releaseBuffers(self: *Self, connection: *Connection, closing: bool) void {
             var released = false;
             inline for (std.meta.tags(Buffer)) |kind| {
                 const index = @intFromEnum(kind);
@@ -1307,11 +1242,7 @@ pub fn Worker(comptime App: type) type {
 
         fn bufferUnavailable(self: *Self, index: usize) RunError!void {
             self.metrics.recorder().add(.buffer_exhaustions_total, 1);
-            try self.reject(
-                index,
-                503,
-                "buffer_budget",
-            );
+            try self.reject(index, 503, "buffer_budget");
         }
 
         /// Releases worker-owned resources. Asserts all I/O has completed; the
@@ -1409,18 +1340,14 @@ pub fn Worker(comptime App: type) type {
                     }
                     if (!self.ticking) {
                         try self.ensureSubmission();
-                        _ = self.ring.timeout(
-                            control(.tick),
-                            &self.tick_interval,
-                            0,
-                            0,
-                        ) catch
+                        _ = self.ring.timeout(control(.tick), &self.tick_interval, 0, 0) catch
                             return error.IoUringResources;
                         self.ticking = true;
                         self.queued();
                     }
-                    if (isolated_application and !self.application_event_pending)
-                        try self.queueApplicationEvent();
+                    if (comptime isolated_application) {
+                        if (!self.application_event_pending) try self.queueApplicationEvent();
+                    }
                     try self.queueLog();
                 }
                 self.metrics.set(.io_pending, self.pending);
@@ -1473,15 +1400,7 @@ pub fn Worker(comptime App: type) type {
             // No SQPOLL and no second submitting thread: entries not consumed
             // by the kernel cannot acquire buffers while cleanup is running.
             const unsubmitted = (self.ring.sq.sqe_tail -% self.ring.sq.sqe_head) +
-                (@atomicLoad(
-                    u32,
-                    self.ring.sq.tail,
-                    .acquire,
-                ) -% @atomicLoad(
-                    u32,
-                    self.ring.sq.head,
-                    .acquire,
-                ));
+                (@atomicLoad(u32, self.ring.sq.tail, .acquire) -% @atomicLoad(u32, self.ring.sq.head, .acquire));
             std.debug.assert(unsubmitted <= self.pending);
             self.pending -= unsubmitted;
             if (self.pending == 0) return;
@@ -1496,11 +1415,7 @@ pub fn Worker(comptime App: type) type {
                 for (kinds) |kind| {
                     // Cancel by unique token, without ALL: an in-progress
                     // operation must finish before its cancellation returns.
-                    cancelSync(&self.ring, token(
-                        kind,
-                        index,
-                        connection.generation,
-                    )) catch
+                    cancelSync(&self.ring, token(kind, index, connection.generation)) catch
                         @panic("previously available synchronous cancellation failed");
                 }
             }
@@ -1565,13 +1480,7 @@ pub fn Worker(comptime App: type) type {
             const kind: Kind = if (admin) .accept_admin else .accept;
             const fd = if (admin) self.admin_listener.fd else self.listener.fd;
             try self.ensureSubmission();
-            _ = self.ring.accept(
-                control(kind),
-                fd,
-                null,
-                null,
-                linux.SOCK.CLOEXEC,
-            ) catch
+            _ = self.ring.accept(control(kind), fd, null, null, linux.SOCK.CLOEXEC) catch
                 return error.IoUringResources;
             if (admin) self.admin_accepting = true else self.accepting = true;
             self.queued();
@@ -1767,11 +1676,7 @@ pub fn Worker(comptime App: type) type {
                             connection.receive_pending = false;
                             if (connection.phase != .canceling) {
                                 if (connection.http2 != null) {
-                                    try self.completedHttp2(
-                                        index,
-                                        completion.res,
-                                        false,
-                                    );
+                                    try self.completedHttp2(index, completion.res, false);
                                 } else if (connection.tls != null and connection.phase != .drain) {
                                     try self.receivedTls(index, completion.res);
                                 } else try self.received(index, completion.res);
@@ -1781,11 +1686,7 @@ pub fn Worker(comptime App: type) type {
                             connection.send_pending = false;
                             if (connection.phase != .canceling) {
                                 if (connection.http2 != null) {
-                                    try self.completedHttp2(
-                                        index,
-                                        completion.res,
-                                        true,
-                                    );
+                                    try self.completedHttp2(index, completion.res, true);
                                 } else if (connection.tls != null) {
                                     try self.sentTls(index, completion.res);
                                 } else try self.sent(index, completion.res);
@@ -1800,11 +1701,7 @@ pub fn Worker(comptime App: type) type {
             }
         }
 
-        fn acceptConnection(
-            self: *Self,
-            fd: linux.fd_t,
-            admin: bool,
-        ) RunError!void {
+        fn acceptConnection(self: *Self, fd: linux.fd_t, admin: bool) RunError!void {
             if (self.draining or self.shouldStop()) {
                 platform.close(fd);
                 return;
@@ -1821,12 +1718,7 @@ pub fn Worker(comptime App: type) type {
                 self.metrics.recorder().add(.connections_refused_total, 1);
                 return;
             };
-            platform.setOption(
-                fd,
-                linux.IPPROTO.TCP,
-                linux.TCP.NODELAY,
-                1,
-            ) catch {
+            platform.setOption(fd, linux.IPPROTO.TCP, linux.TCP.NODELAY, 1) catch {
                 platform.close(fd);
                 self.metrics.recorder().add(.io_errors_total, 1);
                 return;
@@ -1860,21 +1752,11 @@ pub fn Worker(comptime App: type) type {
             self.active_slots[self.active_connections] = index;
             self.active_connections += 1;
             self.metrics.recorder().add(.connections_accepted_total, 1);
-            self.event(
-                index,
-                .debug,
-                "connection_accepted",
-                null,
-            );
+            self.event(index, .debug, "connection_accepted", null);
             if (!admin and self.config.tls != null) {
                 connection.tls = self.createTls() catch |err| {
                     self.metrics.recorder().add(.tls_errors_total, 1);
-                    self.event(
-                        index,
-                        .warn,
-                        "tls_error",
-                        @errorName(err),
-                    );
+                    self.event(index, .warn, "tls_error", @errorName(err));
                     try self.forceClose(index);
                     return;
                 };
@@ -1913,12 +1795,7 @@ pub fn Worker(comptime App: type) type {
             const operation = std.meta.activeTag(session.operation);
             const step = session.advance() catch |err| {
                 self.metrics.recorder().add(.tls_errors_total, 1);
-                self.event(
-                    index,
-                    .debug,
-                    "tls_error",
-                    @errorName(err),
-                );
+                self.event(index, .debug, "tls_error", @errorName(err));
                 try self.forceClose(index);
                 return;
             };
@@ -1926,11 +1803,7 @@ pub fn Worker(comptime App: type) type {
                 .receive => |buffer| {
                     try self.ensureSubmission();
                     _ = self.ring.recv(
-                        token(
-                            .receive,
-                            index,
-                            connection.generation,
-                        ),
+                        token(.receive, index, connection.generation),
                         connection.fd,
                         .{ .buffer = buffer },
                         0,
@@ -1942,11 +1815,7 @@ pub fn Worker(comptime App: type) type {
                 .send => |bytes| {
                     try self.ensureSubmission();
                     _ = self.ring.send(
-                        token(
-                            .send,
-                            index,
-                            connection.generation,
-                        ),
+                        token(.send, index, connection.generation),
                         connection.fd,
                         bytes,
                         linux.MSG.NOSIGNAL,
@@ -1962,11 +1831,7 @@ pub fn Worker(comptime App: type) type {
                         if (session.isHttp2()) {
                             const gpa = self.http2_allocator.allocator();
                             const h2 = gpa.create(Http2) catch return self.forceClose(index);
-                            h2.init(
-                                self,
-                                index,
-                                gpa,
-                            ) catch {
+                            h2.init(self, index, gpa) catch {
                                 gpa.destroy(h2);
                                 return self.forceClose(index);
                             };
@@ -2031,12 +1896,7 @@ pub fn Worker(comptime App: type) type {
         }
 
         /// Records a stream once, after its application hooks have returned.
-        pub fn recordHttp2(
-            self: *Self,
-            index: usize,
-            stream: *Http2.Stream,
-            completed: bool,
-        ) void {
+        pub fn recordHttp2(self: *Self, index: usize, stream: *Http2.Stream, completed: bool) void {
             const duration = platform.monotonicNs() - stream.started_ns;
             self.metrics.recorder().observe(if (!completed)
                 .aborted_duration_seconds
@@ -2076,12 +1936,7 @@ pub fn Worker(comptime App: type) type {
             });
         }
 
-        fn completedHttp2(
-            self: *Self,
-            index: usize,
-            result: i32,
-            sending: bool,
-        ) RunError!void {
+        fn completedHttp2(self: *Self, index: usize, result: i32, sending: bool) RunError!void {
             if (result <= 0) return self.forceClose(index);
             const session = self.connections[index].http2.?;
             const count: usize = @intCast(result);
@@ -2170,11 +2025,7 @@ pub fn Worker(comptime App: type) type {
             if (!connection.send_pending and session.outgoing_start < session.outgoing_end) {
                 try self.ensureSubmission();
                 _ = self.ring.send(
-                    token(
-                        .send,
-                        index,
-                        connection.generation,
-                    ),
+                    token(.send, index, connection.generation),
                     connection.fd,
                     session.outgoing[session.outgoing_start..session.outgoing_end],
                     linux.MSG.NOSIGNAL,
@@ -2194,11 +2045,7 @@ pub fn Worker(comptime App: type) type {
             if (!connection.receive_pending and session.incoming_start == session.incoming_end) {
                 try self.ensureSubmission();
                 _ = self.ring.recv(
-                    token(
-                        .receive,
-                        index,
-                        connection.generation,
-                    ),
+                    token(.receive, index, connection.generation),
                     connection.fd,
                     .{ .buffer = &session.incoming },
                     0,
@@ -2209,11 +2056,7 @@ pub fn Worker(comptime App: type) type {
             }
         }
 
-        fn receivedTls(
-            self: *Self,
-            index: usize,
-            result: i32,
-        ) RunError!void {
+        fn receivedTls(self: *Self, index: usize, result: i32) RunError!void {
             const connection = &self.connections[index];
             const session = connection.tls.?;
             if (result > 0) session.received(@intCast(result));
@@ -2232,11 +2075,7 @@ pub fn Worker(comptime App: type) type {
             try self.advanceTls(index);
         }
 
-        fn sentTls(
-            self: *Self,
-            index: usize,
-            result: i32,
-        ) RunError!void {
+        fn sentTls(self: *Self, index: usize, result: i32) RunError!void {
             if (result <= 0) {
                 self.metrics.recorder().add(.io_errors_total, 1);
                 try self.forceClose(index);
@@ -2254,11 +2093,7 @@ pub fn Worker(comptime App: type) type {
             try self.advanceTls(index);
         }
 
-        fn prepareRequest(
-            self: *Self,
-            connection: *Connection,
-            now: u64,
-        ) void {
+        fn prepareRequest(self: *Self, connection: *Connection, now: u64) void {
             self.releaseBuffers(connection, false);
             connection.application_initialized = false;
             if (connection.receive_start == connection.receive_end) self.releaseRequest(connection);
@@ -2335,11 +2170,7 @@ pub fn Worker(comptime App: type) type {
             }
             try self.ensureSubmission();
             _ = self.ring.recv(
-                token(
-                    .receive,
-                    index,
-                    connection.generation,
-                ),
+                token(.receive, index, connection.generation),
                 connection.fd,
                 .{
                     .buffer = connection.receive_buffer,
@@ -2351,11 +2182,7 @@ pub fn Worker(comptime App: type) type {
             self.queued();
         }
 
-        fn received(
-            self: *Self,
-            index: usize,
-            result: i32,
-        ) RunError!void {
+        fn received(self: *Self, index: usize, result: i32) RunError!void {
             const connection = &self.connections[index];
             if (result <= 0) {
                 if (result < 0 and connection.phase == .writing) return;
@@ -2370,11 +2197,7 @@ pub fn Worker(comptime App: type) type {
                 self.metrics.recorder().add(.peer_disconnects_total, 1);
                 if (connection.phase == .reading and connection.request_started and result == 0) {
                     connection.parser.eof() catch {
-                        try self.reject(
-                            index,
-                            400,
-                            "UnexpectedEof",
-                        );
+                        try self.reject(index, 400, "UnexpectedEof");
                         return;
                     };
                 }
@@ -2463,11 +2286,7 @@ pub fn Worker(comptime App: type) type {
                     if (connection.parser.head_len == connection.parser.head_storage.len) {
                         if (connection.parser.head_storage.len == self.config.header_bytes) {
                             self.metrics.recorder().add(.protocol_errors_total, 1);
-                            try self.reject(
-                                index,
-                                431,
-                                "HeadersTooLarge",
-                            );
+                            try self.reject(index, 431, "HeadersTooLarge");
                             return;
                         }
                         if (!self.ensureBuffer(connection, .head)) return self.bufferUnavailable(index);
@@ -2481,11 +2300,7 @@ pub fn Worker(comptime App: type) type {
                 }
                 const step = connection.parser.feed(input) catch |err| {
                     self.metrics.recorder().add(.protocol_errors_total, 1);
-                    try self.reject(
-                        index,
-                        http.Parser.status(err),
-                        @errorName(err),
-                    );
+                    try self.reject(index, http.Parser.status(err), @errorName(err));
                     return;
                 };
                 connection.receive_start += step.consumed;
@@ -2504,11 +2319,7 @@ pub fn Worker(comptime App: type) type {
                         connection.deadline = now + @as(u64, self.config.body_timeout_ms) * 1_000_000;
                         if (request.scheme) |scheme| {
                             if (!http.syntax.eql(scheme, if (connection.tls != null) "https" else "http")) {
-                                try self.reject(
-                                    index,
-                                    421,
-                                    "target_scheme",
-                                );
+                                try self.reject(index, 421, "target_scheme");
                                 return;
                             }
                         }
@@ -2523,11 +2334,7 @@ pub fn Worker(comptime App: type) type {
                             connection.path_buffer,
                             request.path,
                         ) catch {
-                            try self.reject(
-                                index,
-                                400,
-                                "target_path",
-                            );
+                            try self.reject(index, 400, "target_path");
                             return;
                         };
                         if (request.scheme == null and !std.mem.eql(
@@ -2572,13 +2379,7 @@ pub fn Worker(comptime App: type) type {
                             // Rejected heads never consume body-storage leases.
                             // Admin buffers already have their full capacity.
                             if (request.chunked) {
-                                if (!self.ensureBuffer(
-                                    connection,
-                                    .trailers,
-                                ) or !self.ensureBuffer(
-                                    connection,
-                                    .receive,
-                                ))
+                                if (!self.ensureBuffer(connection, .trailers) or !self.ensureBuffer(connection, .receive))
                                     return self.bufferUnavailable(index);
                             } else if ((request.content_length orelse 0) > connection.receive_buffer.len) {
                                 if (!self.ensureBuffer(
@@ -2599,11 +2400,7 @@ pub fn Worker(comptime App: type) type {
                                 connection.exchange.setRequestRuntime(
                                     &self.application_metrics,
                                     self.io,
-                                    token(
-                                        .receive,
-                                        index,
-                                        connection.generation,
-                                    ) & ~@as(u64, 255),
+                                    token(.receive, index, connection.generation) & ~@as(u64, 255),
                                     connection.request_id,
                                 );
                             }
@@ -2666,21 +2463,13 @@ pub fn Worker(comptime App: type) type {
                                 } else .body;
                                 if (!self.submitApplication(index, stage)) {
                                     connection.application_body = &.{};
-                                    try self.respondStatus(
-                                        index,
-                                        503,
-                                        true,
-                                    );
+                                    try self.respondStatus(index, 503, true);
                                 }
                                 return;
                             }
                         }
                         connection.exchange.receiveBody(bytes) catch |err| {
-                            try self.reject(
-                                index,
-                                413,
-                                @errorName(err),
-                            );
+                            try self.reject(index, 413, @errorName(err));
                             return;
                         };
                     },
@@ -2690,11 +2479,7 @@ pub fn Worker(comptime App: type) type {
                             try self.respondAdmin(index);
                         } else if (comptime isolated_application) {
                             if (!self.submitApplication(index, .response))
-                                try self.respondStatus(
-                                    index,
-                                    503,
-                                    false,
-                                );
+                                try self.respondStatus(index, 503, false);
                         } else {
                             const response = connection.exchange.respond(&connection.parser.request);
                             if (comptime @hasDecl(
@@ -2716,11 +2501,7 @@ pub fn Worker(comptime App: type) type {
                 @as(u64, App.laneOptions(connection.exchange.lane()).timeout_ms) * 1_000_000;
         }
 
-        fn submitApplication(
-            self: *Self,
-            index: usize,
-            stage: ApplicationExecutor.Stage,
-        ) bool {
+        fn submitApplication(self: *Self, index: usize, stage: ApplicationExecutor.Stage) bool {
             if (comptime !isolated_application) comptime unreachable;
             const connection = &self.connections[index];
             connection.phase = .application;
@@ -2849,12 +2630,7 @@ pub fn Worker(comptime App: type) type {
         fn continueAfterHead(self: *Self, index: usize) RunError!void {
             const connection = &self.connections[index];
             const request = &connection.parser.request;
-            self.event(
-                index,
-                .debug,
-                "request_head",
-                null,
-            );
+            self.event(index, .debug, "request_head", null);
             if (!request.expect_continue or (!request.chunked and (request.content_length orelse 0) == 0))
                 return;
             const interim = "HTTP/1.1 100 Continue\r\n\r\n";
@@ -2869,12 +2645,7 @@ pub fn Worker(comptime App: type) type {
             try self.queueSend(index);
         }
 
-        fn respondStatus(
-            self: *Self,
-            index: usize,
-            status: u16,
-            close: bool,
-        ) RunError!void {
+        fn respondStatus(self: *Self, index: usize, status: u16, close: bool) RunError!void {
             const connection = &self.connections[index];
             const allow = if (connection.admin)
                 "GET, HEAD, OPTIONS"
@@ -2901,12 +2672,7 @@ pub fn Worker(comptime App: type) type {
             });
         }
 
-        fn reject(
-            self: *Self,
-            index: usize,
-            status: u16,
-            reason: []const u8,
-        ) RunError!void {
+        fn reject(self: *Self, index: usize, status: u16, reason: []const u8) RunError!void {
             const connection = &self.connections[index];
             self.rejectionEvent(index, reason);
             if (connection.permit == null and !connection.admin) {
@@ -2926,21 +2692,13 @@ pub fn Worker(comptime App: type) type {
                     return;
                 }
             }
-            try self.respondStatus(
-                index,
-                status,
-                true,
-            );
+            try self.respondStatus(index, status, true);
         }
 
         fn receiveAdminHead(self: *Self, index: usize) RunError!bool {
             const connection = &self.connections[index];
             const request = &connection.parser.request;
-            if (std.mem.eql(
-                u8,
-                request.method,
-                "OPTIONS",
-            )) {
+            if (std.mem.eql(u8, request.method, "OPTIONS")) {
                 try self.startResponse(index, .{
                     .status = 204,
                     .headers = &.{.{ .name = "Allow", .value = "GET, HEAD, OPTIONS" }},
@@ -2948,20 +2706,8 @@ pub fn Worker(comptime App: type) type {
                 });
                 return true;
             }
-            if (!std.mem.eql(
-                u8,
-                request.method,
-                "GET",
-            ) and !std.mem.eql(
-                u8,
-                request.method,
-                "HEAD",
-            )) {
-                try self.respondStatus(
-                    index,
-                    501,
-                    true,
-                );
+            if (!std.mem.eql(u8, request.method, "GET") and !std.mem.eql(u8, request.method, "HEAD")) {
+                try self.respondStatus(index, 501, true);
                 return true;
             }
             const known = for ([_][]const u8{
@@ -2972,57 +2718,25 @@ pub fn Worker(comptime App: type) type {
                 "/debug/workers",
                 "/healthz",
             }) |path| {
-                if (std.mem.eql(
-                    u8,
-                    request.path,
-                    path,
-                )) break true;
+                if (std.mem.eql(u8, request.path, path)) break true;
             } else false;
             if (!known) {
-                try self.respondStatus(
-                    index,
-                    404,
-                    true,
-                );
+                try self.respondStatus(index, 404, true);
                 return true;
             }
-            if (std.mem.eql(
-                u8,
-                request.path,
-                "/debug/connections",
-            )) {
+            if (std.mem.eql(u8, request.path, "/debug/connections")) {
                 _ = self.connectionStart(request.query) catch {
-                    try self.respondStatus(
-                        index,
-                        400,
-                        true,
-                    );
+                    try self.respondStatus(index, 400, true);
                     return true;
                 };
-            } else if (std.mem.eql(
-                u8,
-                request.path,
-                "/debug/workers",
-            )) {
+            } else if (std.mem.eql(u8, request.path, "/debug/workers")) {
                 _ = parseStart(request.query, self.config.workers) catch {
-                    try self.respondStatus(
-                        index,
-                        400,
-                        true,
-                    );
+                    try self.respondStatus(index, 400, true);
                     return true;
                 };
             }
-            if (self.draining and std.mem.eql(
-                u8,
-                request.path,
-                "/healthz",
-            )) {
-                try self.respondStatus(
-                    index,
-                    503,
-                    true,
-                );
+            if (self.draining and std.mem.eql(u8, request.path, "/healthz")) {
+                try self.respondStatus(index, 503, true);
                 return true;
             }
             const precondition = http.conditions.evaluate(
@@ -3030,11 +2744,7 @@ pub fn Worker(comptime App: type) type {
                 .{},
                 platform.realtimeNs(self.io) / 1_000_000_000,
             ) catch {
-                try self.respondStatus(
-                    index,
-                    400,
-                    true,
-                );
+                try self.respondStatus(index, 400, true);
                 return true;
             };
             if (precondition) |status| {
@@ -3065,18 +2775,10 @@ pub fn Worker(comptime App: type) type {
             const request = &connection.parser.request;
             var writer: std.Io.Writer = .fixed(connection.application_buffer);
             var content_type: []const u8 = "application/json";
-            if (std.mem.eql(
-                u8,
-                request.path,
-                "/metrics",
-            )) {
+            if (std.mem.eql(u8, request.path, "/metrics")) {
                 const snapshot = self.aggregateMetrics();
                 metrics_format.prometheus.write(&snapshot, &writer) catch {
-                    try self.respondStatus(
-                        index,
-                        500,
-                        true,
-                    );
+                    try self.respondStatus(index, 500, true);
                     return;
                 };
                 if (comptime has_application_metrics) {
@@ -3086,103 +2788,51 @@ pub fn Worker(comptime App: type) type {
                         &writer,
                         App.metrics_namespace,
                     ) catch {
-                        try self.respondStatus(
-                            index,
-                            500,
-                            true,
-                        );
+                        try self.respondStatus(index, 500, true);
                         return;
                     };
                 }
                 content_type = metrics_format.prometheus.content_type;
-            } else if (std.mem.eql(
-                u8,
-                request.path,
-                "/debug/metrics",
-            )) {
+            } else if (std.mem.eql(u8, request.path, "/debug/metrics")) {
                 const snapshot = self.aggregateMetrics();
                 var json: std.json.Stringify = .{ .writer = &writer };
                 json.beginObject() catch {
-                    try self.respondStatus(
-                        index,
-                        500,
-                        true,
-                    );
+                    try self.respondStatus(index, 500, true);
                     return;
                 };
                 metrics_format.json.writeFields(&snapshot, &json) catch {
-                    try self.respondStatus(
-                        index,
-                        500,
-                        true,
-                    );
+                    try self.respondStatus(index, 500, true);
                     return;
                 };
                 if (comptime has_application_metrics) {
                     const application_snapshot = self.aggregateApplicationMetrics();
                     json.objectField("application") catch {
-                        try self.respondStatus(
-                            index,
-                            500,
-                            true,
-                        );
+                        try self.respondStatus(index, 500, true);
                         return;
                     };
                     ApplicationMetrics.writeJson(&application_snapshot, &json) catch {
-                        try self.respondStatus(
-                            index,
-                            500,
-                            true,
-                        );
+                        try self.respondStatus(index, 500, true);
                         return;
                     };
                 }
                 json.endObject() catch {
-                    try self.respondStatus(
-                        index,
-                        500,
-                        true,
-                    );
+                    try self.respondStatus(index, 500, true);
                     return;
                 };
                 writer.writeByte('\n') catch {
-                    try self.respondStatus(
-                        index,
-                        500,
-                        true,
-                    );
+                    try self.respondStatus(index, 500, true);
                     return;
                 };
                 content_type = metrics_format.json.content_type;
-            } else if (std.mem.eql(
-                u8,
-                request.path,
-                "/debug/config",
-            )) {
-                std.json.Stringify.value(
-                    self.config,
-                    .{},
-                    &writer,
-                ) catch {
-                    try self.respondStatus(
-                        index,
-                        500,
-                        true,
-                    );
+            } else if (std.mem.eql(u8, request.path, "/debug/config")) {
+                std.json.Stringify.value(self.config, .{}, &writer) catch {
+                    try self.respondStatus(index, 500, true);
                     return;
                 };
-            } else if (std.mem.eql(
-                u8,
-                request.path,
-                "/debug/connections",
-            )) {
+            } else if (std.mem.eql(u8, request.path, "/debug/connections")) {
                 try self.inspectConnections(index);
                 return;
-            } else if (std.mem.eql(
-                u8,
-                request.path,
-                "/debug/workers",
-            )) {
+            } else if (std.mem.eql(u8, request.path, "/debug/workers")) {
                 self.writeWorkers(&writer, request.query) catch |err| {
                     try self.respondStatus(
                         index,
@@ -3191,11 +2841,7 @@ pub fn Worker(comptime App: type) type {
                     );
                     return;
                 };
-            } else if (std.mem.eql(
-                u8,
-                request.path,
-                "/healthz",
-            )) {
+            } else if (std.mem.eql(u8, request.path, "/healthz")) {
                 try self.respondStatus(
                     index,
                     if (self.draining or self.shouldStop()) 503 else 200,
@@ -3203,11 +2849,7 @@ pub fn Worker(comptime App: type) type {
                 );
                 return;
             } else {
-                try self.respondStatus(
-                    index,
-                    404,
-                    false,
-                );
+                try self.respondStatus(index, 404, false);
                 return;
             }
             const fields = [_]http.Header{
@@ -3247,16 +2889,8 @@ pub fn Worker(comptime App: type) type {
 
         fn parseStart(query: []const u8, limit: usize) error{InvalidQuery}!usize {
             if (query.len == 0) return 0;
-            if (!std.mem.startsWith(
-                u8,
-                query,
-                "start=",
-            )) return error.InvalidQuery;
-            const start = std.fmt.parseInt(
-                usize,
-                query[6..],
-                10,
-            ) catch return error.InvalidQuery;
+            if (!std.mem.startsWith(u8, query, "start=")) return error.InvalidQuery;
+            const start = std.fmt.parseInt(usize, query[6..], 10) catch return error.InvalidQuery;
             if (start > limit) return error.InvalidQuery;
             return start;
         }
@@ -3278,11 +2912,7 @@ pub fn Worker(comptime App: type) type {
                 const connection = &self.connections[index];
                 if (connection.fd < 0) continue;
                 result.connections[result.len] = .{
-                    .id = token(
-                        .receive,
-                        index,
-                        connection.generation,
-                    ) & ~@as(u64, 255),
+                    .id = token(.receive, index, connection.generation) & ~@as(u64, 255),
                     .worker = self.worker_id,
                     .admin = connection.admin,
                     .phase = connection.phase,
@@ -3301,11 +2931,7 @@ pub fn Worker(comptime App: type) type {
 
         fn inspectConnections(self: *Self, index: usize) RunError!void {
             const start = self.connectionStart(self.connections[index].parser.request.query) catch {
-                try self.respondStatus(
-                    index,
-                    400,
-                    true,
-                );
+                try self.respondStatus(index, 400, true);
                 return;
             };
             const first_count = self.config.max_connections + self.config.admin_connections;
@@ -3320,11 +2946,7 @@ pub fn Worker(comptime App: type) type {
             );
             const inspection = &self.shared.?.workers[id].inspection;
             if (inspection.phase.load(.acquire) != .idle) {
-                try self.respondStatus(
-                    index,
-                    503,
-                    true,
-                );
+                try self.respondStatus(index, 503, true);
                 return;
             }
             inspection.start = start - first_count - (id - 1) * self.config.max_connections;
@@ -3354,11 +2976,7 @@ pub fn Worker(comptime App: type) type {
             }
         }
 
-        fn respondPage(
-            self: *Self,
-            index: usize,
-            page: *const Page,
-        ) RunError!void {
+        fn respondPage(self: *Self, index: usize, page: *const Page) RunError!void {
             var writer: std.Io.Writer = .fixed(self.connections[index].application_buffer);
             const captured = self.aggregateMetrics();
             std.json.Stringify.value(
@@ -3372,11 +2990,7 @@ pub fn Worker(comptime App: type) type {
                 .{},
                 &writer,
             ) catch {
-                try self.respondStatus(
-                    index,
-                    500,
-                    true,
-                );
+                try self.respondStatus(index, 500, true);
                 return;
             };
             try self.startResponse(index, .{
@@ -3425,20 +3039,11 @@ pub fn Worker(comptime App: type) type {
             try json.endObject();
         }
 
-        fn startResponse(
-            self: *Self,
-            index: usize,
-            initial: http.Response,
-        ) RunError!void {
+        fn startResponse(self: *Self, index: usize, initial: http.Response) RunError!void {
             const connection = &self.connections[index];
             var response = initial;
             if (response.status < 200) {
-                self.event(
-                    index,
-                    .@"error",
-                    "invalid_final_status",
-                    null,
-                );
+                self.event(index, .@"error", "invalid_final_status", null);
                 try self.forceClose(index);
                 return;
             }
@@ -3465,22 +3070,12 @@ pub fn Worker(comptime App: type) type {
                         &connection.parser.request,
                         &self.date,
                     ) catch {
-                        self.event(
-                            index,
-                            .@"error",
-                            "response_invalid",
-                            null,
-                        );
+                        self.event(index, .@"error", "response_invalid", null);
                         try self.forceClose(index);
                         return;
                     };
                 }
-                self.event(
-                    index,
-                    .@"error",
-                    "response_invalid",
-                    null,
-                );
+                self.event(index, .@"error", "response_invalid", null);
                 try self.forceClose(index);
                 return;
             };
@@ -3629,11 +3224,7 @@ pub fn Worker(comptime App: type) type {
             try self.ensureSubmission();
             const flags = linux.MSG.NOSIGNAL | @as(u32, if (batch.send_more) linux.MSG.MORE else 0);
             _ = self.ring.send(
-                token(
-                    .send,
-                    index,
-                    connection.generation,
-                ),
+                token(.send, index, connection.generation),
                 connection.fd,
                 batch.bytes[batch.sent..batch.len],
                 flags,
@@ -3643,11 +3234,7 @@ pub fn Worker(comptime App: type) type {
             self.queued();
         }
 
-        fn sentBatch(
-            self: *Self,
-            index: usize,
-            result: i32,
-        ) RunError!void {
+        fn sentBatch(self: *Self, index: usize, result: i32) RunError!void {
             const connection = &self.connections[index];
             const batch = connection.batch.?;
             if (result <= 0) {
@@ -3674,11 +3261,7 @@ pub fn Worker(comptime App: type) type {
                 if (self.config.access_log) self.logger.emit(.{
                     .timestamp_ns = platform.realtimeNs(self.io),
                     .event = "request_complete",
-                    .connection = token(
-                        .receive,
-                        index,
-                        connection.generation,
-                    ) & ~@as(u64, 255),
+                    .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
                     .request = response.request_id,
                     .status = response.status,
                     .method = response.method[0..response.method_len],
@@ -3782,22 +3365,14 @@ pub fn Worker(comptime App: type) type {
             try self.ensureSubmission();
             if (vector) {
                 _ = self.ring.sendmsg(
-                    token(
-                        .send,
-                        index,
-                        connection.generation,
-                    ),
+                    token(.send, index, connection.generation),
                     connection.fd,
                     &connection.send_message,
                     send_flags,
                 ) catch return error.IoUringResources;
             } else {
                 _ = self.ring.send(
-                    token(
-                        .send,
-                        index,
-                        connection.generation,
-                    ),
+                    token(.send, index, connection.generation),
                     connection.fd,
                     bytes,
                     send_flags,
@@ -3891,11 +3466,7 @@ pub fn Worker(comptime App: type) type {
             connection.output_len = writer.buffered().len;
         }
 
-        fn sent(
-            self: *Self,
-            index: usize,
-            result: i32,
-        ) RunError!void {
+        fn sent(self: *Self, index: usize, result: i32) RunError!void {
             const connection = &self.connections[index];
             if (comptime can_batch) {
                 if (connection.batch) |batch| {
@@ -3953,12 +3524,7 @@ pub fn Worker(comptime App: type) type {
                     return self.pumpResponseStream(index);
                 } else fillStream(connection) catch |err| {
                     if (err == error.EmptyStreamFragment)
-                        self.event(
-                            index,
-                            .@"error",
-                            "empty_stream_fragment",
-                            null,
-                        );
+                        self.event(index, .@"error", "empty_stream_fragment", null);
                     try self.forceClose(index);
                     return;
                 };
@@ -3970,11 +3536,7 @@ pub fn Worker(comptime App: type) type {
             try self.finishResponse(index, first_ns);
         }
 
-        fn finishResponse(
-            self: *Self,
-            index: usize,
-            first_ns: ?u64,
-        ) RunError!void {
+        fn finishResponse(self: *Self, index: usize, first_ns: ?u64) RunError!void {
             const connection = &self.connections[index];
             self.metrics.recorder().add(.requests_completed_total, 1);
             connection.request_completed = true;
@@ -4002,11 +3564,7 @@ pub fn Worker(comptime App: type) type {
                 self.logger.emit(.{
                     .timestamp_ns = platform.realtimeNs(self.io),
                     .event = "request_complete",
-                    .connection = token(
-                        .receive,
-                        index,
-                        connection.generation,
-                    ) & ~@as(u64, 255),
+                    .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
                     .request = connection.request_id,
                     .status = connection.response_status,
                     .method = connection.parser.request.method,
@@ -4065,16 +3623,8 @@ pub fn Worker(comptime App: type) type {
             if (connection.receive_pending and !connection.cancel_receive_pending) {
                 try self.ensureSubmission();
                 _ = self.ring.cancel(
-                    token(
-                        .cancel_receive,
-                        index,
-                        connection.generation,
-                    ),
-                    token(
-                        .receive,
-                        index,
-                        connection.generation,
-                    ),
+                    token(.cancel_receive, index, connection.generation),
+                    token(.receive, index, connection.generation),
                     0,
                 ) catch
                     return error.IoUringResources;
@@ -4085,16 +3635,8 @@ pub fn Worker(comptime App: type) type {
             if (connection.send_pending and !connection.cancel_send_pending) {
                 try self.ensureSubmission();
                 _ = self.ring.cancel(
-                    token(
-                        .cancel_send,
-                        index,
-                        connection.generation,
-                    ),
-                    token(
-                        .send,
-                        index,
-                        connection.generation,
-                    ),
+                    token(.cancel_send, index, connection.generation),
+                    token(.send, index, connection.generation),
                     0,
                 ) catch
                     return error.IoUringResources;
@@ -4105,11 +3647,7 @@ pub fn Worker(comptime App: type) type {
             self.finishClose(index);
         }
 
-        fn drainConnection(
-            self: *Self,
-            index: usize,
-            now: u64,
-        ) RunError!void {
+        fn drainConnection(self: *Self, index: usize, now: u64) RunError!void {
             const connection = &self.connections[index];
             self.removeIdle(index);
             connection.phase = .drain;
@@ -4122,16 +3660,8 @@ pub fn Worker(comptime App: type) type {
                     if (!connection.cancel_receive_pending) {
                         try self.ensureSubmission();
                         _ = self.ring.cancel(
-                            token(
-                                .cancel_receive,
-                                index,
-                                connection.generation,
-                            ),
-                            token(
-                                .receive,
-                                index,
-                                connection.generation,
-                            ),
+                            token(.cancel_receive, index, connection.generation),
+                            token(.receive, index, connection.generation),
                             0,
                         ) catch return error.IoUringResources;
                         connection.cancel_receive_pending = true;
@@ -4170,12 +3700,7 @@ pub fn Worker(comptime App: type) type {
                     platform.monotonicNs() - connection.started_ns,
                 );
             }
-            self.event(
-                index,
-                .debug,
-                "connection_closed",
-                null,
-            );
+            self.event(index, .debug, "connection_closed", null);
             self.releaseBuffers(connection, true);
             self.releaseRequest(connection);
             self.releaseConnectionBuffers(connection);
@@ -4224,11 +3749,7 @@ pub fn Worker(comptime App: type) type {
                         .events = 0,
                         .revents = 0,
                     }};
-                    _ = linux.poll(
-                        &socket_poll,
-                        1,
-                        0,
-                    );
+                    _ = linux.poll(&socket_poll, 1, 0);
                     if (socket_poll[0].revents & (linux.POLL.ERR | linux.POLL.HUP) != 0) {
                         self.metrics.recorder().add(.peer_disconnects_total, 1);
                         try self.forceClose(index);
@@ -4281,16 +3802,8 @@ pub fn Worker(comptime App: type) type {
                     if (connection.receive_pending and !connection.cancel_receive_pending) {
                         try self.ensureSubmission();
                         _ = self.ring.cancel(
-                            token(
-                                .cancel_receive,
-                                index,
-                                connection.generation,
-                            ),
-                            token(
-                                .receive,
-                                index,
-                                connection.generation,
-                            ),
+                            token(.cancel_receive, index, connection.generation),
+                            token(.receive, index, connection.generation),
                             0,
                         ) catch
                             return error.IoUringResources;
@@ -4298,11 +3811,7 @@ pub fn Worker(comptime App: type) type {
                         connection.pending += 1;
                         self.queued();
                     }
-                    try self.reject(
-                        index,
-                        408,
-                        "deadline",
-                    );
+                    try self.reject(index, 408, "deadline");
                 } else try self.forceClose(index);
             }
         }
@@ -4346,30 +3855,17 @@ pub fn Worker(comptime App: type) type {
                 .timestamp_ns = platform.realtimeNs(self.io),
                 .level = level,
                 .event = name,
-                .connection = token(
-                    .receive,
-                    index,
-                    connection.generation,
-                ) & ~@as(u64, 255),
+                .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
                 .request = if (connection.request_started) connection.request_id else null,
                 .reason = reason,
                 .phase = if (self.config.verbose) @tagName(connection.phase) else null,
             });
         }
 
-        fn rejectionEvent(
-            self: *Self,
-            index: usize,
-            reason: []const u8,
-        ) void {
+        fn rejectionEvent(self: *Self, index: usize, reason: []const u8) void {
             self.rejection_events +%= 1;
             if (!self.config.verbose and self.rejection_events % 1024 != 1) return;
-            self.event(
-                index,
-                .warn,
-                "request_rejected",
-                reason,
-            );
+            self.event(index, .warn, "request_rejected", reason);
         }
 
         fn stopListening(self: *Self) void {
@@ -4421,11 +3917,7 @@ pub fn Worker(comptime App: type) type {
             }
         }
 
-        fn cancelControl(
-            self: *Self,
-            kind: Kind,
-            target: Kind,
-        ) RunError!void {
+        fn cancelControl(self: *Self, kind: Kind, target: Kind) RunError!void {
             try self.ensureSubmission();
             _ = self.ring.cancel(
                 control(kind),
@@ -4502,49 +3994,33 @@ test "embedded application receives normalized routing and preserved request oct
     const testing = std.testing;
     const app = struct {
         pub const Exchange = struct {
-            pub fn init(_: *@This(), _: []u8) void {}
+            pub fn init(_: *Exchange, _: []u8) void {}
 
-            pub fn receiveHead(_: *@This(), request: *const http.Request) ?http.Response {
-                const bytes = if (std.mem.eql(
-                    u8,
-                    request.query,
-                    "target",
-                ))
+            pub fn receiveHead(_: *Exchange, request: *const http.Request) ?http.Response {
+                const bytes = if (std.mem.eql(u8, request.query, "target"))
                     request.target
-                else if (std.mem.eql(
-                    u8,
-                    request.query,
-                    "path",
-                ))
+                else if (std.mem.eql(u8, request.query, "path"))
                     request.path
-                else if (std.mem.eql(
-                    u8,
-                    request.query,
-                    "host",
-                ))
+                else if (std.mem.eql(u8, request.query, "host"))
                     request.getHeader("host") orelse "missing"
-                else if (std.mem.eql(
-                    u8,
-                    request.query,
-                    "scheme",
-                ))
+                else if (std.mem.eql(u8, request.query, "scheme"))
                     request.scheme orelse "missing"
                 else
                     request.authority;
                 return .{ .body = .{ .bytes = bytes }, .close = true };
             }
 
-            pub fn receiveBody(_: *@This(), _: []const u8) error{}!void {}
+            pub fn receiveBody(_: *Exchange, _: []const u8) error{}!void {}
 
-            pub fn respond(_: *@This(), _: *const http.Request) http.Response {
+            pub fn respond(_: *Exchange, _: *const http.Request) http.Response {
                 return .{ .status = 500, .close = true };
             }
 
-            pub fn produce(_: *@This(), _: []u8) ?[]const u8 {
+            pub fn produce(_: *Exchange, _: []u8) ?[]const u8 {
                 return null;
             }
 
-            pub fn allowedMethods(_: *const @This()) []const u8 {
+            pub fn allowedMethods(_: *const Exchange) []const u8 {
                 return "GET";
             }
         };
@@ -4573,11 +4049,7 @@ test "embedded application receives normalized routing and preserved request oct
     };
     defer workers[0].deinit();
     workers[0].log_disabled = true;
-    const thread = try std.Thread.spawn(
-        .{},
-        TestServer.workerMain,
-        .{&workers[0]},
-    );
+    const thread = try std.Thread.spawn(.{}, TestServer.workerMain, .{&workers[0]});
     defer {
         stop.store(true, .monotonic);
         thread.join();
@@ -4608,11 +4080,7 @@ test "embedded application receives normalized routing and preserved request oct
         var reader = stream.reader(testing.io, &buffer);
         const response = try reader.interface.allocRemaining(testing.allocator, .limited(4096));
         defer testing.allocator.free(response);
-        try testing.expect(std.mem.startsWith(
-            u8,
-            response,
-            "HTTP/1.",
-        ));
+        try testing.expect(std.mem.startsWith(u8, response, "HTTP/1."));
         try testing.expectEqualStrings("200", response[9..12]);
         const body = (std.mem.indexOf(
             u8,
@@ -4621,33 +4089,13 @@ test "embedded application receives normalized routing and preserved request oct
         ) orelse return error.MissingHead) + 4;
         try testing.expectEqualStrings(case[1], response[body..]);
     }
-    try testing.expectEqualStrings("[::1]", defaultAuthority(
-        &authority_buffer,
-        "::1",
-        80,
-        80,
-    ));
+    try testing.expectEqualStrings("[::1]", defaultAuthority(&authority_buffer, "::1", 80, 80));
     try testing.expectEqualStrings(
         "[::1]:8080",
-        defaultAuthority(
-            &authority_buffer,
-            "::1",
-            8080,
-            80,
-        ),
+        defaultAuthority(&authority_buffer, "::1", 8080, 80),
     );
-    try testing.expectEqualStrings("[::1]", defaultAuthority(
-        &authority_buffer,
-        "::1",
-        443,
-        443,
-    ));
-    try testing.expectEqualStrings("[::1]:80", defaultAuthority(
-        &authority_buffer,
-        "::1",
-        80,
-        443,
-    ));
+    try testing.expectEqualStrings("[::1]", defaultAuthority(&authority_buffer, "::1", 443, 443));
+    try testing.expectEqualStrings("[::1]:80", defaultAuthority(&authority_buffer, "::1", 80, 443));
 }
 
 test "fatal completion drains existing receives before returning" {
@@ -4698,11 +4146,7 @@ test "fatal completion drains existing receives before returning" {
         .active_connections = 1,
         .admin_free = 1,
     };
-    server.logger.init(
-        slots,
-        &server.metrics,
-        false,
-    );
+    server.logger.init(slots, &server.metrics, false);
     server.admission.init(.{}, platform.monotonicNs());
     connections[0] = .{
         .fd = pair[0],
@@ -4713,17 +4157,8 @@ test "fatal completion drains existing receives before returning" {
         .deadline = std.math.maxInt(u64),
     };
     connections[1] = .{ .admin = true };
-    const receive_token = TestServer.token(
-        .receive,
-        0,
-        1,
-    );
-    _ = try server.ring.recv(
-        receive_token,
-        pair[0],
-        .{ .buffer = storage },
-        0,
-    );
+    const receive_token = TestServer.token(.receive, 0, 1);
+    _ = try server.ring.recv(receive_token, pair[0], .{ .buffer = storage }, 0);
     server.queued();
     // Keep the regression's failing version safe: release the socket read and
     // collect its CQE before its buffer is returned to the testing allocator.
@@ -4781,11 +4216,7 @@ test "fatal cleanup closes accepted descriptors from an abandoned CQ batch" {
         .flags = 0,
     });
     try std.testing.expectEqual(@as(usize, 0), server.pending);
-    try std.testing.expectEqual(linux.E.BADF, linux.errno(linux.fcntl(
-        fd,
-        linux.F.GETFD,
-        0,
-    )));
+    try std.testing.expectEqual(linux.E.BADF, linux.errno(linux.fcntl(fd, linux.F.GETFD, 0)));
 }
 
 test "late canceled receive preserves the response drain" {
@@ -4880,11 +4311,7 @@ test "fatal worker error stops and joins the other event loops" {
     )));
     platform.close(workers[1].listener.fd);
     workers[1].listener.fd = invalid_listener;
-    const thread = try std.Thread.spawn(
-        .{},
-        TestServer.workerMain,
-        .{&workers[1]},
-    );
+    const thread = try std.Thread.spawn(.{}, TestServer.workerMain, .{&workers[1]});
     workers[0].workerMain();
     thread.join();
     try testing.expect(shared.abort.load(.monotonic));
@@ -4942,7 +4369,7 @@ test "unused and idle slots defer application initialization until request dispa
     const app = struct {
         var initializations: usize = 0;
         pub const Exchange = struct {
-            pub fn init(_: *@This(), _: []u8) void {
+            pub fn init(_: *Exchange, _: []u8) void {
                 initializations += 1;
             }
         };
@@ -5058,11 +4485,7 @@ test "connection buffer allocation failure closes only the public socket and rec
     workers[0].log_disabled = true;
     failing.fail_index = failing.alloc_index;
     failing.resize_fail_index = failing.resize_index;
-    const thread = try std.Thread.spawn(
-        .{},
-        TestServer.workerMain,
-        .{&workers[0]},
-    );
+    const thread = try std.Thread.spawn(.{}, TestServer.workerMain, .{&workers[0]});
     defer {
         stop.store(true, .monotonic);
         thread.join();
@@ -5083,11 +4506,7 @@ test "connection buffer allocation failure closes only the public socket and rec
         "GET /debug/metrics HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
     );
     defer testing.allocator.free(admin);
-    try testing.expect(std.mem.startsWith(
-        u8,
-        admin,
-        "HTTP/1.1 200 ",
-    ));
+    try testing.expect(std.mem.startsWith(u8, admin, "HTTP/1.1 200 "));
     try testing.expectEqual(
         @as(u64, 1),
         workers[0].metrics.get(.connection_buffer_exhaustions_total),
@@ -5101,16 +4520,8 @@ test "connection buffer allocation failure closes only the public socket and rec
         "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
     );
     defer testing.allocator.free(recovered);
-    try testing.expect(std.mem.startsWith(
-        u8,
-        recovered,
-        "HTTP/1.1 200 ",
-    ));
-    const body = (std.mem.indexOf(
-        u8,
-        recovered,
-        "\r\n\r\n",
-    ) orelse return error.MissingHead) + 4;
+    try testing.expect(std.mem.startsWith(u8, recovered, "HTTP/1.1 200 "));
+    const body = (std.mem.indexOf(u8, recovered, "\r\n\r\n") orelse return error.MissingHead) + 4;
     try testing.expectEqualStrings("ZHTPS\n", recovered[body..]);
 }
 
@@ -5166,7 +4577,7 @@ test "stream batching preserves producer capacity and a deferred fragment" {
         pub const Exchange = struct {
             calls: usize = 0,
 
-            pub fn produce(exchange: *@This(), destination: []u8) ?[]const u8 {
+            pub fn produce(exchange: *Exchange, destination: []u8) ?[]const u8 {
                 std.debug.assert(destination.len == 64);
                 const call = exchange.calls;
                 exchange.calls += 1;
@@ -5213,7 +4624,7 @@ test "stream batching bounds calls and rejects an empty fragment" {
         pub const Exchange = struct {
             calls: usize = 0,
             empty: bool = false,
-            pub fn produce(exchange: *@This(), destination: []u8) ?[]const u8 {
+            pub fn produce(exchange: *Exchange, destination: []u8) ?[]const u8 {
                 _ = destination;
                 exchange.calls += 1;
                 return if (exchange.empty) "" else "x";
@@ -5297,11 +4708,7 @@ test "connection storage is retained through every cancellation completion order
                     fourth,
                 }, 0..) |kind, completed| {
                     try server.complete(.{
-                        .user_data = TestServer.token(
-                            kind,
-                            0,
-                            connections[0].generation,
-                        ),
+                        .user_data = TestServer.token(kind, 0, connections[0].generation),
                         .res = -@as(i32, @intFromEnum(linux.E.CANCELED)),
                         .flags = 0,
                     });
@@ -5439,11 +4846,7 @@ test "response batch cancellation retains pool storage until both completions" {
         };
         for (order, 0..) |kind, completed| {
             try instance.complete(.{
-                .user_data = TestServer.token(
-                    kind,
-                    0,
-                    0,
-                ),
+                .user_data = TestServer.token(kind, 0, 0),
                 .res = -@as(i32, @intFromEnum(linux.E.CANCELED)),
                 .flags = 0,
             });
@@ -5521,11 +4924,7 @@ test "response batch partial sends complete and log each response exactly once" 
         .admission = .{ .active = 2 },
         .draining = true,
     };
-    instance.logger.init(
-        &slots,
-        &instance.metrics,
-        false,
-    );
+    instance.logger.init(&slots, &instance.metrics, false);
     const results = [_]struct {
         bytes: i32,
         completed: u64,

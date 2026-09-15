@@ -9,7 +9,6 @@ const Admission = @import("../Admission.zig");
 const Config = @import("../Config.zig");
 const Metrics = @import("../Metrics.zig");
 const application = @import("../application.zig");
-const log = std.log.scoped(.server_http2);
 
 pub const Stage = enum {
     head,
@@ -176,11 +175,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
         }
 
         /// Starts a stream or its trailer block; protocol callbacks run only on the owning worker.
-        pub fn begin(
-            self: *Self,
-            id: i32,
-            trailers: bool,
-        ) protocol.Error!void {
+        pub fn begin(self: *Self, id: i32, trailers: bool) protocol.Error!void {
             if (trailers) {
                 const stream = self.find(id) orelse return error.Protocol;
                 if (stream.trailers) return error.Protocol;
@@ -245,11 +240,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             owned.* = next;
         }
 
-        fn relocated(
-            previous: []const u8,
-            next: []const u8,
-            bytes: []const u8,
-        ) []const u8 {
+        fn relocated(previous: []const u8, next: []const u8, bytes: []const u8) []const u8 {
             const base = @intFromPtr(previous.ptr);
             const address = @intFromPtr(bytes.ptr);
             if (bytes.len == 0 or address < base or address - base >= previous.len) return bytes;
@@ -258,11 +249,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             return next[offset..][0..bytes.len];
         }
 
-        fn reserveHead(
-            self: *Self,
-            stream: *Stream,
-            extra: usize,
-        ) protocol.Error!void {
+        fn reserveHead(self: *Self, stream: *Stream, extra: usize) protocol.Error!void {
             const maximum = 2 * self.owner.config.header_bytes;
             if (extra > maximum - stream.head_len) return error.HeaderListTooLarge;
             const previous = stream.headBytes();
@@ -279,32 +266,12 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             const next = stream.headBytes();
             const used = previous[0..stream.head_len];
             for (stream.fields()[0..stream.field_count]) |*field| {
-                field.name = relocated(
-                    used,
-                    next,
-                    field.name,
-                );
-                field.value = relocated(
-                    used,
-                    next,
-                    field.value,
-                );
+                field.name = relocated(used, next, field.name);
+                field.value = relocated(used, next, field.value);
             }
-            stream.request.method = relocated(
-                used,
-                next,
-                stream.request.method,
-            );
-            stream.request.target = relocated(
-                used,
-                next,
-                stream.request.target,
-            );
-            stream.request.authority = relocated(
-                used,
-                next,
-                stream.request.authority,
-            );
+            stream.request.method = relocated(used, next, stream.request.method);
+            stream.request.target = relocated(used, next, stream.request.target);
+            stream.request.authority = relocated(used, next, stream.request.authority);
             if (stream.request.scheme) |scheme| stream.request.scheme = relocated(
                 used,
                 next,
@@ -312,11 +279,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             );
         }
 
-        fn reserveTrailers(
-            self: *Self,
-            stream: *Stream,
-            extra: usize,
-        ) protocol.Error!void {
+        fn reserveTrailers(self: *Self, stream: *Stream, extra: usize) protocol.Error!void {
             const maximum = self.owner.config.trailer_bytes;
             if (extra > maximum - stream.trailer_len) return error.HeaderListTooLarge;
             const previous = stream.storage.trailers;
@@ -396,40 +359,20 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
                 try self.reserveFields(stream);
                 stream.storage.trailer_fields[stream.trailer_count] = .{ .name = key, .value = text };
                 stream.trailer_count += 1;
-            } else if (std.mem.eql(
-                u8,
-                name,
-                ":method",
-            )) {
+            } else if (std.mem.eql(u8, name, ":method")) {
                 stream.request.method = text;
-            } else if (std.mem.eql(
-                u8,
-                name,
-                ":path",
-            )) {
+            } else if (std.mem.eql(u8, name, ":path")) {
                 stream.request.target = text;
-            } else if (std.mem.eql(
-                u8,
-                name,
-                ":authority",
-            )) {
+            } else if (std.mem.eql(u8, name, ":authority")) {
                 stream.request.authority = text;
-            } else if (std.mem.eql(
-                u8,
-                name,
-                ":scheme",
-            )) {
+            } else if (std.mem.eql(u8, name, ":scheme")) {
                 stream.request.scheme = text;
             } else {
                 if (name[0] == ':') return error.Protocol;
                 try self.reserveFields(stream);
                 stream.fields()[stream.field_count] = .{ .name = key, .value = text };
                 stream.field_count += 1;
-                if (std.mem.eql(
-                    u8,
-                    name,
-                    "content-length",
-                )) {
+                if (std.mem.eql(u8, name, "content-length")) {
                     stream.request.content_length = std.fmt.parseInt(
                         u64,
                         text,
@@ -440,12 +383,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
         }
 
         /// Completes a head or trailer block and dispatches eligible application work.
-        pub fn headComplete(
-            self: *Self,
-            id: i32,
-            trailers: bool,
-            ended: bool,
-        ) protocol.Error!void {
+        pub fn headComplete(self: *Self, id: i32, trailers: bool, ended: bool) protocol.Error!void {
             const stream = self.find(id) orelse return;
             if (trailers) {
                 if (!ended) return error.Protocol;
@@ -457,11 +395,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             var cookie_len: usize = 0;
             var cookie_count: usize = 0;
             for (stream.fields()[0..stream.field_count], 0..) |field, index| {
-                if (!std.mem.eql(
-                    u8,
-                    field.name,
-                    "cookie",
-                )) continue;
+                if (!std.mem.eql(u8, field.name, "cookie")) continue;
                 if (first_cookie == null) first_cookie = index;
                 cookie_len += field.value.len;
                 cookie_count += 1;
@@ -474,11 +408,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
                 var count: usize = 0;
                 var seen: usize = 0;
                 for (stream.fields()[0..stream.field_count]) |field| {
-                    if (std.mem.eql(
-                        u8,
-                        field.name,
-                        "cookie",
-                    )) {
+                    if (std.mem.eql(u8, field.name, "cookie")) {
                         if (seen != 0) writer.writeAll("; ") catch unreachable;
                         writer.writeAll(field.value) catch unreachable;
                         seen += 1;
@@ -497,11 +427,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
         }
 
         /// Buffers or dispatches input under stream flow control; retains no borrowed input bytes.
-        pub fn body(
-            self: *Self,
-            id: i32,
-            bytes: []const u8,
-        ) protocol.Error!void {
+        pub fn body(self: *Self, id: i32, bytes: []const u8) protocol.Error!void {
             try self.engine.consumeConnection(bytes.len);
             const stream = self.find(id) orelse return;
             if (stream.closed or stream.response != null) {
@@ -528,11 +454,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
         }
 
         /// Marks a stream closed and cancels work; storage survives until borrowed tasks finish.
-        pub fn closed(
-            self: *Self,
-            id: i32,
-            code: u32,
-        ) void {
+        pub fn closed(self: *Self, id: i32, code: u32) void {
             const stream = self.find(id) orelse return;
             stream.closed = true;
             stream.close_code = code;
@@ -656,11 +578,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             const request = &stream.request;
             const config = self.owner.config;
             if (!stream.initialized) {
-                if (std.mem.eql(
-                    u8,
-                    request.method,
-                    "CONNECT",
-                )) return self.status(stream, 501);
+                if (std.mem.eql(u8, request.method, "CONNECT")) return self.status(stream, 501);
                 if (!http.syntax.eql(request.scheme orelse "", "https")) return self.status(stream, 421);
                 if (request.authority.len == 0) request.authority = request.getHeader("host") orelse "";
                 if (!http.syntax.isAuthority(
@@ -674,35 +592,16 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
                 const target = request.target;
                 if (target.len == 0 or target.len > 8192 or
                     !http.syntax.isUriComponent(target, true)) return self.status(stream, 400);
-                const question = std.mem.indexOfScalar(
-                    u8,
-                    target,
-                    '?',
-                );
+                const question = std.mem.indexOfScalar(u8, target, '?');
                 const path = target[0 .. question orelse target.len];
-                if (path[0] != '/' and !(std.mem.eql(
-                    u8,
-                    path,
-                    "*",
-                ) and
-                    std.mem.eql(
-                        u8,
-                        request.method,
-                        "OPTIONS",
-                    ))) return self.status(stream, 400);
+                if (path[0] != '/' and !(std.mem.eql(u8, path, "*") and
+                    std.mem.eql(u8, request.method, "OPTIONS"))) return self.status(stream, 400);
                 if (path.len > stream.pathBytes().len)
-                    try self.growBytes(
-                        &stream.storage.path,
-                        &.{},
-                        path.len,
-                    );
+                    try self.growBytes(&stream.storage.path, &.{}, path.len);
                 request.path = http.path.normalize(
                     stream.pathBytes(),
                     path,
-                ) catch return self.status(
-                    stream,
-                    400,
-                );
+                ) catch return self.status(stream, 400);
                 if (question) |at| request.query = target[at + 1 ..];
                 if (request.getHeader("expect")) |expect| {
                     if (!http.syntax.eql(expect, "100-continue")) return self.status(stream, 417);
@@ -777,16 +676,8 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             try self.respond(stream, stream.exchange.respond(request));
         }
 
-        fn submit(
-            self: *Self,
-            stream: *Stream,
-            stage: Stage,
-        ) protocol.Error!void {
-            if (!self.owner.submitHttp2(
-                self.index,
-                stream,
-                stage,
-            )) try self.status(stream, 503);
+        fn submit(self: *Self, stream: *Stream, stage: Stage) protocol.Error!void {
+            if (!self.owner.submitHttp2(self.index, stream, stage)) try self.status(stream, 503);
         }
 
         /// Completes the sole task borrowing this stream. A reset or timeout
@@ -830,11 +721,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             }
         }
 
-        fn status(
-            self: *Self,
-            stream: *Stream,
-            code: u16,
-        ) protocol.Error!void {
+        fn status(self: *Self, stream: *Stream, code: u16) protocol.Error!void {
             if (stream.permit == null) {
                 self.owner.admission.refill(platform.monotonicNs());
                 stream.permit = self.owner.admission.acquireRejection();
@@ -848,11 +735,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
             });
         }
 
-        fn respond(
-            self: *Self,
-            stream: *Stream,
-            response: http.Response,
-        ) protocol.Error!void {
+        fn respond(self: *Self, stream: *Stream, response: http.Response) protocol.Error!void {
             if (response.status < 200) return self.reset(stream);
             const plan = response.framing(&stream.request) catch return self.reset(stream);
             const has_body = !plan.suppressed and switch (response.body) {
@@ -860,21 +743,13 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
                 .stream => true,
             };
             if (has_body and response.body == .stream)
-                try self.reserveOutput(
-                    stream,
-                    self.owner.config.response_bytes,
-                    0,
-                );
+                try self.reserveOutput(stream, self.owner.config.response_bytes, 0);
             var fields: [63]http.Header = undefined;
             fields[0] = .{ .name = "date", .value = &self.owner.date };
             var count: usize = 1;
             var length_buffer: [20]u8 = undefined;
             const length_text = if (plan.content_length) |len|
-                std.fmt.bufPrint(
-                    &length_buffer,
-                    "{d}",
-                    .{len},
-                ) catch unreachable
+                std.fmt.bufPrint(&length_buffer, "{d}", .{len}) catch unreachable
             else
                 "";
             if (plan.content_length != null) {
@@ -912,19 +787,11 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
                     for (field.name) |byte| {
                         if (!std.ascii.isUpper(byte)) continue;
                         const previous = stream.outputBytes();
-                        try self.reserveOutput(
-                            stream,
-                            names_used + field.name.len,
-                            names_used,
-                        );
+                        try self.reserveOutput(stream, names_used + field.name.len, names_used);
                         const names = stream.outputBytes();
                         if (previous.ptr != names.ptr) {
                             for (fields[0..count]) |*prior|
-                                prior.name = relocated(
-                                    previous[0..names_used],
-                                    names,
-                                    prior.name,
-                                );
+                                prior.name = relocated(previous[0..names_used], names, prior.name);
                         }
                         const lower = names[names_used..][0..field.name.len];
                         _ = std.ascii.lowerString(lower, field.name);
@@ -941,12 +808,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
                 u64,
                 self.owner.config.write_timeout_ms,
             ) * 1_000_000;
-            try self.engine.respond(
-                stream.id,
-                response.status,
-                fields[0..count],
-                has_body,
-            );
+            try self.engine.respond(stream.id, response.status, fields[0..count], has_body);
             self.owner.metrics.recorder().response(response.status);
             if (stream.body_len != 0) {
                 try self.engine.consumeStream(stream.id, stream.body_len);
@@ -976,11 +838,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
         }
 
         /// Copies available response bytes into destination; null defers and zero ends output.
-        pub fn produce(
-            self: *Self,
-            id: i32,
-            destination: []u8,
-        ) protocol.Error!?usize {
+        pub fn produce(self: *Self, id: i32, destination: []u8) protocol.Error!?usize {
             const stream = self.find(id) orelse return error.Protocol;
             const response = stream.response orelse return null;
             if (stream.closed) return error.Protocol;
@@ -1063,11 +921,7 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
                 .request_duration_seconds,
                 platform.monotonicNs() - stream.started_ns,
             );
-            self.owner.recordHttp2(
-                self.index,
-                stream,
-                completed,
-            );
+            self.owner.recordHttp2(self.index, stream, completed);
             if (comptime @hasDecl(App.Exchange, "releaseApplication")) {
                 if (stream.initialized) {
                     stream.exchange.releaseApplication(&stream.request);
@@ -1111,12 +965,7 @@ const TestOwner = struct {
     free_http2_stream: ?*Connection(application, TestOwner).Stream = null,
     date: [29]u8 = undefined,
 
-    pub fn recordHttp2(
-        _: *TestOwner,
-        _: usize,
-        _: anytype,
-        _: bool,
-    ) void {}
+    pub fn recordHttp2(_: *TestOwner, _: usize, _: anytype, _: bool) void {}
 };
 
 fn allocationScenario(gpa: std.mem.Allocator) !void {
@@ -1125,11 +974,7 @@ fn allocationScenario(gpa: std.mem.Allocator) !void {
     owner.admission.init(try owner.config.resolveAdmission(), platform.monotonicNs());
     http.Response.formatDate(0, &owner.date);
     var session: Connection(application, TestOwner) = undefined;
-    try session.init(
-        &owner,
-        0,
-        gpa,
-    );
+    try session.init(&owner, 0, gpa);
     defer session.deinit();
     const preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" ++ "\x00\x00\x00\x04\x00\x00\x00\x00\x00";
     _ = try session.engine.receive(preface);
@@ -1190,11 +1035,7 @@ fn writeTestString(writer: *std.Io.Writer, bytes: []const u8) !void {
     try writer.writeAll(bytes);
 }
 
-fn writeTestField(
-    writer: *std.Io.Writer,
-    name: []const u8,
-    value: []const u8,
-) !void {
+fn writeTestField(writer: *std.Io.Writer, name: []const u8, value: []const u8) !void {
     try writer.writeByte(0);
     try writeTestString(writer, name);
     try writeTestString(writer, value);
@@ -1207,11 +1048,7 @@ fn storageGrowthScenario(gpa: std.mem.Allocator) !void {
     owner.admission.init(try owner.config.resolveAdmission(), platform.monotonicNs());
     http.Response.formatDate(0, &owner.date);
     var session: Session = undefined;
-    try session.init(
-        &owner,
-        0,
-        gpa,
-    );
+    try session.init(&owner, 0, gpa);
     defer session.deinit();
     _ = try session.engine.receive("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" ++
         "\x00\x00\x00\x04\x00\x00\x00\x00\x00");
@@ -1219,31 +1056,11 @@ fn storageGrowthScenario(gpa: std.mem.Allocator) !void {
     var buffer: [8192]u8 = undefined;
     var writer: std.Io.Writer = .fixed(&buffer);
     try writer.writeAll("\x83\x87");
-    try writeTestField(
-        &writer,
-        ":path",
-        "/" ++ "x" ** 300 ++ "/../echo",
-    );
-    try writeTestField(
-        &writer,
-        ":authority",
-        "localhost",
-    );
-    try writeTestField(
-        &writer,
-        "cookie",
-        "a" ** 120,
-    );
-    try writeTestField(
-        &writer,
-        "cookie",
-        "b" ** 120,
-    );
-    for (0..40) |_| try writeTestField(
-        &writer,
-        "x-growth",
-        "v" ** 120,
-    );
+    try writeTestField(&writer, ":path", "/" ++ "x" ** 300 ++ "/../echo");
+    try writeTestField(&writer, ":authority", "localhost");
+    try writeTestField(&writer, "cookie", "a" ** 120);
+    try writeTestField(&writer, "cookie", "b" ** 120);
+    for (0..40) |_| try writeTestField(&writer, "x-growth", "v" ** 120);
     var frame: [9]u8 = .{
         0,
         0,
@@ -1255,12 +1072,7 @@ fn storageGrowthScenario(gpa: std.mem.Allocator) !void {
         0,
         1,
     };
-    std.mem.writeInt(
-        u24,
-        frame[0..3],
-        @intCast(writer.end),
-        .big,
-    );
+    std.mem.writeInt(u24, frame[0..3], @intCast(writer.end), .big);
     _ = try session.engine.receive(&frame);
     _ = try session.engine.receive(writer.buffered());
     try session.drive();
@@ -1271,18 +1083,9 @@ fn storageGrowthScenario(gpa: std.mem.Allocator) !void {
 
     _ = try session.engine.receive("\x00\x00\x05\x00\x00\x00\x00\x00\x01hello");
     writer = .fixed(&buffer);
-    for (0..40) |_| try writeTestField(
-        &writer,
-        "x-result",
-        "t" ** 120,
-    );
+    for (0..40) |_| try writeTestField(&writer, "x-result", "t" ** 120);
     frame[4] = 5;
-    std.mem.writeInt(
-        u24,
-        frame[0..3],
-        @intCast(writer.end),
-        .big,
-    );
+    std.mem.writeInt(u24, frame[0..3], @intCast(writer.end), .big);
     _ = try session.engine.receive(&frame);
     _ = try session.engine.receive(writer.buffered());
     try session.drive();
@@ -1307,17 +1110,9 @@ fn storageGrowthScenario(gpa: std.mem.Allocator) !void {
 }
 
 test "http2 stream storage and body ingestion unwind every allocation failure" {
-    try std.testing.checkAllAllocationFailures(
-        std.testing.allocator,
-        allocationScenario,
-        .{},
-    );
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, allocationScenario, .{});
 }
 
 test "http2 metadata growth unwinds every allocation failure" {
-    try std.testing.checkAllAllocationFailures(
-        std.testing.allocator,
-        storageGrowthScenario,
-        .{},
-    );
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, storageGrowthScenario, .{});
 }

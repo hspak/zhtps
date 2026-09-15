@@ -4,7 +4,6 @@ const std = @import("std");
 const http = @import("../http.zig");
 const syntax = @import("syntax.zig");
 const Request = http.Request;
-const log = std.log.scoped(.http_parser);
 const Parser = @This();
 
 head_storage: []u8 = &.{},
@@ -91,12 +90,7 @@ const Transcript = struct {
 
 /// Borrows stable buffers until the parser is discarded. Neither buffer may
 /// overlap incoming bytes. Asserts field limits fit the built-in field tables.
-pub fn init(
-    parser: *Parser,
-    head_storage: []u8,
-    trailer_storage: []u8,
-    limits: Limits,
-) void {
+pub fn init(parser: *Parser, head_storage: []u8, trailer_storage: []u8, limits: Limits) void {
     std.debug.assert(limits.max_header_count <= max_fields);
     std.debug.assert(limits.max_trailer_count <= max_fields);
     parser.* = .{
@@ -109,11 +103,7 @@ pub fn init(
 /// Invalidates all borrowed request strings. Asserts the previous message ended.
 pub fn reset(parser: *Parser) void {
     std.debug.assert(parser.phase == .complete);
-    parser.init(
-        parser.head_storage,
-        parser.trailer_storage,
-        parser.limits,
-    );
+    parser.init(parser.head_storage, parser.trailer_storage, parser.limits);
 }
 
 /// Consumes at most one event. Head/trailer slices live until reset; body slices
@@ -333,39 +323,19 @@ fn parseChunkSize(bytes: []const u8) Error!u64 {
     var i: usize = 0;
     while (i < bytes.len and syntax.isHex(bytes[i])) : (i += 1) {}
     if (i == 0) return error.InvalidChunk;
-    const size = std.fmt.parseInt(
-        u64,
-        bytes[0..i],
-        16,
-    ) catch return error.InvalidChunk;
+    const size = std.fmt.parseInt(u64, bytes[0..i], 16) catch return error.InvalidChunk;
     var rest = bytes[i..];
     while (rest.len > 0) {
-        rest = std.mem.trimStart(
-            u8,
-            rest,
-            " \t",
-        );
+        rest = std.mem.trimStart(u8, rest, " \t");
         if (rest.len == 0 or rest[0] != ';') return error.InvalidChunk;
-        rest = std.mem.trimStart(
-            u8,
-            rest[1..],
-            " \t",
-        );
+        rest = std.mem.trimStart(u8, rest[1..], " \t");
         i = 0;
         while (i < rest.len and syntax.isTokenByte(rest[i])) : (i += 1) {}
         if (i == 0) return error.InvalidChunk;
         rest = rest[i..];
-        const after_name = std.mem.trimStart(
-            u8,
-            rest,
-            " \t",
-        );
+        const after_name = std.mem.trimStart(u8, rest, " \t");
         if (after_name.len > 0 and after_name[0] == '=') {
-            rest = std.mem.trimStart(
-                u8,
-                after_name[1..],
-                " \t",
-            );
+            rest = std.mem.trimStart(u8, after_name[1..], " \t");
             if (rest.len > 0 and rest[0] == '"') {
                 i = syntax.quotedLength(rest) orelse return error.InvalidChunk;
             } else {
@@ -392,11 +362,7 @@ fn parseTranscript(wire: []const u8, fragment: usize) !Transcript {
     var head: [8192]u8 = undefined;
     var trailers: [4096]u8 = undefined;
     var parser: Parser = undefined;
-    parser.init(
-        &head,
-        &trailers,
-        .{},
-    );
+    parser.init(&head, &trailers, .{});
     var transcript: Transcript = .{};
     var body_hash = std.hash.Wyhash.init(0);
     var trailer_hash = std.hash.Wyhash.init(0);
@@ -452,11 +418,7 @@ test "fragmented chunked body and trailers preserve pipelined request boundary" 
         var head: [1024]u8 = undefined;
         var trailers: [256]u8 = undefined;
         var parser: Parser = undefined;
-        parser.init(
-            &head,
-            &trailers,
-            .{},
-        );
+        parser.init(&head, &trailers, .{});
         var output: [5]u8 = undefined;
         var body_len: usize = 0;
         var offset: usize = 0;
@@ -496,11 +458,7 @@ test "framing is independent of request method and unframed POST has zero body" 
     var head: [1024]u8 = undefined;
     var trailers: [256]u8 = undefined;
     var parser: Parser = undefined;
-    parser.init(
-        &head,
-        &trailers,
-        .{},
-    );
+    parser.init(&head, &trailers, .{});
     const wire = "GET / HTTP/1.1\r\nHost: local\r\nContent-Length: 3\r\n\r\nabcNEXT";
     const first = try parser.feed(wire);
     const body = try parser.feed(wire[first.consumed..]);
@@ -531,19 +489,11 @@ test "incomplete body reports truncation and body size is bounded" {
     var head: [1024]u8 = undefined;
     var trailers: [256]u8 = undefined;
     var parser: Parser = undefined;
-    parser.init(
-        &head,
-        &trailers,
-        .{ .max_body_bytes = 3 },
-    );
+    parser.init(&head, &trailers, .{ .max_body_bytes = 3 });
     _ = try parser.feed("POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 3\r\n\r\n");
     _ = try parser.feed("ab");
     try std.testing.expectError(error.UnexpectedEof, parser.eof());
-    parser.init(
-        &head,
-        &trailers,
-        .{ .max_body_bytes = 3 },
-    );
+    parser.init(&head, &trailers, .{ .max_body_bytes = 3 });
     try std.testing.expectError(error.BodyTooLarge, parser.feed(
         "POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 4\r\n\r\n",
     ));
@@ -590,11 +540,7 @@ test "header block scans respect exact storage limits and unaligned input" {
             var head: [wire.len + 3]u8 = @splat(0xa5);
             var trailers: [8]u8 = undefined;
             var parser: Parser = undefined;
-            parser.init(
-                head[1..][0..capacity],
-                &trailers,
-                .{},
-            );
+            parser.init(head[1..][0..capacity], &trailers, .{});
             const result = parser.feed(input[offset..][0..wire.len]);
             if (capacity < wire.len) {
                 try testing.expectError(error.HeadersTooLarge, result);
@@ -623,11 +569,7 @@ test "fuzz framing is invariant under transport fragmentation" {
         for (corpus, 0..) |wire, i| result[i] = &std.mem.toBytes(@as(u32, wire.len)) ++ wire;
         break :seeds result;
     };
-    try std.testing.fuzz(
-        {},
-        fuzzFraming,
-        .{ .corpus = &seeds },
-    );
+    try std.testing.fuzz({}, fuzzFraming, .{ .corpus = &seeds });
 }
 
 test "field bytes retain validation at vector boundaries" {
@@ -656,11 +598,7 @@ test "field bytes retain validation at vector boundaries" {
                 wire[prefix.len + offset] = @intCast(byte);
                 @memcpy(wire[prefix.len + length ..][0..4], "\r\n\r\n");
                 var parser: Parser = undefined;
-                parser.init(
-                    &head,
-                    &trailers,
-                    .{},
-                );
+                parser.init(&head, &trailers, .{});
                 const input = wire[0 .. prefix.len + length + 4];
                 if (byte == '\t' or (byte >= 0x20 and byte != 0x7f)) {
                     const step = try parser.feed(input);
@@ -688,11 +626,7 @@ test "chunk framing budget counts all overhead across fragments and resets per r
             var head: [256]u8 = undefined;
             var trailers: [64]u8 = undefined;
             var parser: Parser = undefined;
-            parser.init(
-                &head,
-                &trailers,
-                .{ .max_chunk_framing_bytes = limit },
-            );
+            parser.init(&head, &trailers, .{ .max_chunk_framing_bytes = limit });
             var offset: usize = 0;
             var body_len: usize = 0;
             while (parser.phase != .complete) {

@@ -2,15 +2,10 @@
 
 const std = @import("std");
 const zhtps = @import("zhtps");
-const log = std.log.scoped(.request_costs);
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    const n = if (args.len > 1) try std.fmt.parseInt(
-        usize,
-        args[1],
-        10,
-    ) else 5_000_000;
+    const n = if (args.len > 1) try std.fmt.parseInt(usize, args[1], 10) else 5_000_000;
     if (n == 0) return error.InvalidIterations;
     const Shared = std.meta.Child(@FieldType(zhtps.DefaultServer, "shared"));
     const Worker = std.meta.Elem(@FieldType(Shared, "workers"));
@@ -47,11 +42,7 @@ pub fn main(init: std.process.Init) !void {
         var slots: [1]zhtps.Logger.Slot = undefined;
         var metrics: zhtps.Metrics = .{};
         var logger: zhtps.Logger = undefined;
-        logger.init(
-            &slots,
-            &metrics,
-            false,
-        );
+        logger.init(&slots, &metrics, false);
         const begin = zhtps.platform.monotonicNs();
         switch (case) {
             .monotonic => for (0..n) |_| {
@@ -71,11 +62,7 @@ pub fn main(init: std.process.Init) !void {
                 std.mem.doNotOptimizeAway(&response);
                 std.mem.doNotOptimizeAway(&request);
                 var writer: std.Io.Writer = .fixed(&output);
-                std.mem.doNotOptimizeAway(try response.begin(
-                    &writer,
-                    &request,
-                    &date,
-                ));
+                std.mem.doNotOptimizeAway(try response.begin(&writer, &request, &date));
                 try writer.writeAll("ZHTPS\n");
                 std.mem.doNotOptimizeAway(writer.buffered());
             },

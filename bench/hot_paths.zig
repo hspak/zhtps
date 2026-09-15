@@ -2,15 +2,10 @@
 
 const std = @import("std");
 const zhtps = @import("zhtps");
-const log = std.log.scoped(.hot_paths);
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    const iterations = if (args.len > 1) try std.fmt.parseInt(
-        u64,
-        args[1],
-        10,
-    ) else 10_000_000;
+    const iterations = if (args.len > 1) try std.fmt.parseInt(u64, args[1], 10) else 10_000_000;
     if (iterations == 0) return error.InvalidIterations;
     const cases = [_]struct {
         name: []const u8,
@@ -36,12 +31,7 @@ pub fn main(init: std.process.Init) !void {
         var admission: zhtps.Admission align(64) = undefined;
         admission.init(case.options, 0);
         const begin = zhtps.platform.monotonicNs();
-        const decisions = runAdmission(
-            &admission,
-            iterations,
-            case.interval_ns,
-            case.draining,
-        );
+        const decisions = runAdmission(&admission, iterations, case.interval_ns, case.draining);
         const elapsed = zhtps.platform.monotonicNs() - begin;
         std.debug.print(
             "{{\"case\":\"{s}\",\"iterations\":{d},\"elapsed_ns\":{d},\"decisions\":[{d},{d},{d}]}}\n",
@@ -81,11 +71,7 @@ pub fn main(init: std.process.Init) !void {
             durations[random.random().uintLessThan(usize, durations.len)]
         else if (index == 0) 5000 else 100_000;
         const begin = zhtps.platform.monotonicNs();
-        runHistogram(
-            &metrics,
-            &samples,
-            iterations,
-        );
+        runHistogram(&metrics, &samples, iterations);
         const elapsed = zhtps.platform.monotonicNs() - begin;
         const snapshot = metrics.snapshot();
         std.debug.print(
@@ -108,17 +94,9 @@ pub fn main(init: std.process.Init) !void {
         var head: [4096]u8 = undefined;
         var trailers: [256]u8 = undefined;
         var parser: zhtps.http.Parser align(64) = undefined;
-        parser.init(
-            &head,
-            &trailers,
-            .{},
-        );
+        parser.init(&head, &trailers, .{});
         const begin = zhtps.platform.monotonicNs();
-        try runParser(
-            &parser,
-            request,
-            parser_iterations,
-        );
+        try runParser(&parser, request, parser_iterations);
         const elapsed = zhtps.platform.monotonicNs() - begin;
         std.debug.print("{{\"case\":\"parser_{s}\",\"iterations\":{d},\"elapsed_ns\":{d}}}\n", .{
             if (index == 0) "short" else "headers",

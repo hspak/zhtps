@@ -3,7 +3,6 @@
 const std = @import("std");
 const zhtps = @import("zhtps");
 const linux = zhtps.platform.linux;
-const log = std.log.scoped(.tls_application);
 
 var stopping: std.atomic.Value(bool) = .init(false);
 var gate: std.atomic.Value(bool) = .init(false);
@@ -17,7 +16,7 @@ fn stop(_: linux.SIG) callconv(.c) void {
 }
 
 const api = struct {
-    const C = zhtps.Call(@This());
+    const C = zhtps.Call(api);
     pub const Local = struct { bytes: usize = 0, retained: []const u8 = "" };
     pub const lanes = .{
         .default = .{
@@ -37,11 +36,7 @@ const api = struct {
         },
     };
     pub const routes = .{
-        zhtps.staticFiles(
-            @This(),
-            "/static",
-            .{ .root = "." },
-        ),
+        zhtps.staticFiles(api, "/static", .{ .root = "." }),
         zhtps.get("/events", events),
         zhtps.get("/stream-cancel", events),
         zhtps.get("/generated", generated),
@@ -115,17 +110,9 @@ const api = struct {
         _ = holding.fetchAdd(1, .release);
         try stream.writer.writeAll("data: first\n\n");
         try stream.flush();
-        while ((!gate.load(.acquire) or std.mem.eql(
-            u8,
-            call.request.path,
-            "/stream-cancel",
-        )) and
+        while ((!gate.load(.acquire) or std.mem.eql(u8, call.request.path, "/stream-cancel")) and
             !call.isCanceled())
-            std.Io.sleep(
-                call.io,
-                .fromMilliseconds(1),
-                .awake,
-            ) catch {};
+            std.Io.sleep(call.io, .fromMilliseconds(1), .awake) catch {};
         try stream.writer.writeAll(call.local.retained);
     }
 
@@ -213,17 +200,9 @@ const api = struct {
             "invalid-name",
         ))
             &.{.{ .name = "bad name", .value = "value" }}
-        else if (std.mem.eql(
-            u8,
-            call.request.query,
-            "invalid-value",
-        ))
+        else if (std.mem.eql(u8, call.request.query, "invalid-value"))
             &.{.{ .name = "x-value", .value = "a\r\nb" }}
-        else if (std.mem.eql(
-            u8,
-            call.request.query,
-            "reserved",
-        ))
+        else if (std.mem.eql(u8, call.request.query, "reserved"))
             &.{.{ .name = "Date", .value = "invalid" }}
         else
             &.{
@@ -249,11 +228,7 @@ const api = struct {
     }
 
     fn responseBudget(call: *C) !zhtps.http.Response {
-        const len = std.fmt.parseInt(
-            usize,
-            call.request.query,
-            10,
-        ) catch return error.InvalidInput;
+        const len = std.fmt.parseInt(usize, call.request.query, 10) catch return error.InvalidInput;
         const fields = try call.scratch.allocator().alloc(zhtps.http.Header, 1);
         const text = try call.scratch.allocator().alloc(u8, len);
         @memset(text, 'x');
@@ -266,16 +241,8 @@ const api = struct {
         const fields = try gpa.alloc(zhtps.http.Header, 40);
         for (fields, 0..) |*field, index| {
             field.* = .{
-                .name = try std.fmt.allocPrint(
-                    gpa,
-                    "X-Custom-Header-{d}-Padding",
-                    .{index},
-                ),
-                .value = try std.fmt.allocPrint(
-                    gpa,
-                    "value-{d}",
-                    .{index},
-                ),
+                .name = try std.fmt.allocPrint(gpa, "X-Custom-Header-{d}-Padding", .{index}),
+                .value = try std.fmt.allocPrint(gpa, "value-{d}", .{index}),
             };
         }
         return .{ .headers = fields, .body = .{ .bytes = "ok" } };
@@ -283,31 +250,19 @@ const api = struct {
 
     fn hold(call: *C) !zhtps.http.Response {
         _ = holding.fetchAdd(1, .release);
-        while (!gate.load(.acquire)) std.Io.sleep(
-            call.io,
-            .fromMilliseconds(1),
-            .awake,
-        ) catch {};
+        while (!gate.load(.acquire)) std.Io.sleep(call.io, .fromMilliseconds(1), .awake) catch {};
         return call.text(.ok, "released");
     }
 
     fn slow(call: *C) !zhtps.http.Response {
-        std.Io.sleep(
-            call.io,
-            .fromMilliseconds(250),
-            .awake,
-        ) catch {};
+        std.Io.sleep(call.io, .fromMilliseconds(250), .awake) catch {};
         return call.text(.ok, "late");
     }
 
     fn cancel(call: *C) !zhtps.http.Response {
         _ = holding.fetchAdd(1, .release);
         while (!call.isCanceled() and !stopping.load(.monotonic))
-            std.Io.sleep(
-                call.io,
-                .fromMilliseconds(1),
-                .awake,
-            ) catch {};
+            std.Io.sleep(call.io, .fromMilliseconds(1), .awake) catch {};
         return call.text(.ok, "canceled");
     }
 
@@ -350,65 +305,25 @@ const api = struct {
     }
 
     pub fn release(call: *C) void {
-        if (std.mem.eql(
-            u8,
-            call.request.path,
-            "/hold",
-        ) or std.mem.eql(
-            u8,
-            call.request.path,
-            "/upload",
-        ) or
-            std.mem.eql(
-                u8,
-                call.request.path,
-                "/cancel",
-            ) or
-            std.mem.eql(
-                u8,
-                call.request.path,
-                "/events",
-            ) or
-            std.mem.eql(
-                u8,
-                call.request.path,
-                "/stream-cancel",
-            ) or
-            std.mem.eql(
-                u8,
-                call.request.path,
-                "/stream-timeout",
-            ) or
-            std.mem.eql(
-                u8,
-                call.request.path,
-                "/generated",
-            ))
+        if (std.mem.eql(u8, call.request.path, "/hold") or std.mem.eql(u8, call.request.path, "/upload") or
+            std.mem.eql(u8, call.request.path, "/cancel") or
+            std.mem.eql(u8, call.request.path, "/events") or
+            std.mem.eql(u8, call.request.path, "/stream-cancel") or
+            std.mem.eql(u8, call.request.path, "/stream-timeout") or
+            std.mem.eql(u8, call.request.path, "/generated"))
             _ = released.fetchAdd(1, .release);
     }
 };
 
-fn initialize(
-    gpa: std.mem.Allocator,
-    io: std.Io,
-    config: zhtps.Config,
-) !void {
+fn initialize(gpa: std.mem.Allocator, io: std.Io, config: zhtps.Config) !void {
     var server: zhtps.DefaultServer = undefined;
-    try server.init(
-        gpa,
-        io,
-        config,
-    );
+    try server.init(gpa, io, config);
     defer server.deinit();
 }
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    const check_allocations = args.len > 1 and std.mem.eql(
-        u8,
-        args[1],
-        "--check-allocations",
-    );
+    const check_allocations = args.len > 1 and std.mem.eql(u8, args[1], "--check-allocations");
     var config = try zhtps.Config.parse(args[if (check_allocations) @as(usize, 2) else 1..]);
     var allocator: std.heap.DebugAllocator(.{}) = .init;
     defer std.debug.assert(allocator.deinit() == .ok);
@@ -430,15 +345,6 @@ pub fn main(init: std.process.Init) !void {
         .flags = 0,
     };
     for ([_]linux.SIG{ .TERM, .INT }) |sig|
-        _ = try zhtps.platform.check(linux.sigaction(
-            sig,
-            &action,
-            null,
-        ));
-    try zhtps.Server(zhtps.Application(api)).run(
-        allocator.allocator(),
-        init.io,
-        config,
-        &stopping,
-    );
+        _ = try zhtps.platform.check(linux.sigaction(sig, &action, null));
+    try zhtps.Server(zhtps.Application(api)).run(allocator.allocator(), init.io, config, &stopping);
 }

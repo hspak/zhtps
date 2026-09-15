@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const Metrics = @import("Metrics.zig");
-const log = std.log.scoped(.logger);
 const Logger = @This();
 
 slots: []Slot = &.{},
@@ -64,12 +63,7 @@ pub const Event = struct {
 /// Borrows queue storage and metrics until the logger is discarded. The owning
 /// event-loop thread alone may mutate the queue. A peeked slot stays stable
 /// until that record is consumed, including while the kernel references its bytes.
-pub fn init(
-    logger: *Logger,
-    slots: []Slot,
-    metrics: *Metrics,
-    verbose: bool,
-) void {
+pub fn init(logger: *Logger, slots: []Slot, metrics: *Metrics, verbose: bool) void {
     logger.* = .{
         .slots = slots,
         .metrics = metrics,
@@ -156,11 +150,7 @@ fn writeRecord(record: Event, writer: *std.Io.Writer) std.Io.Writer.Error!void {
 }
 
 fn writeJsonString(value: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    try std.json.Stringify.value(
-        value,
-        .{},
-        writer,
-    );
+    try std.json.Stringify.value(value, .{}, writer);
 }
 
 fn writeAttribute(value: Attribute.Scalar, writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -218,11 +208,7 @@ test "logger escapes JSON, filters debug, and drops when queue is full" {
     var slots: [1]Slot = undefined;
     var metrics: Metrics = .{};
     var logger: Logger = undefined;
-    logger.init(
-        &slots,
-        &metrics,
-        false,
-    );
+    logger.init(&slots, &metrics, false);
     logger.emit(.{
         .timestamp_ns = 0,
         .level = .debug,
@@ -265,11 +251,7 @@ test "batched log writes preserve partial records across queue wrap" {
     var slots: [3]Slot = undefined;
     var metrics: Metrics = .{};
     var logger: Logger = undefined;
-    logger.init(
-        &slots,
-        &metrics,
-        false,
-    );
+    logger.init(&slots, &metrics, false);
     logger.emit(.{ .timestamp_ns = 0, .event = "discard" });
     logger.consume();
     logger.emit(.{ .timestamp_ns = 1, .event = "first" });
@@ -301,11 +283,7 @@ test "access records preserve escaping, extra fields and overflow accounting" {
     var slots: [1]Slot = undefined;
     var metrics: Metrics = .{};
     var logger: Logger = undefined;
-    logger.init(
-        &slots,
-        &metrics,
-        false,
-    );
+    logger.init(&slots, &metrics, false);
     logger.worker = 7;
     var event: Event = .{
         .timestamp_ns = 1,
@@ -350,11 +328,7 @@ test "logger appends route and structured fields" {
     var slots: [1]Slot = undefined;
     var metrics: Metrics = .{};
     var logger: Logger = undefined;
-    logger.init(
-        &slots,
-        &metrics,
-        false,
-    );
+    logger.init(&slots, &metrics, false);
     logger.emit(.{
         .timestamp_ns = 1,
         .event = "custom",

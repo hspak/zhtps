@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const zhtps = @import("zhtps");
-const log = std.log.scoped(.embedded);
 
 const Serving = struct {
     server: *zhtps.DefaultServer,
@@ -29,11 +28,7 @@ pub fn main(init: std.process.Init) !void {
 
     var serving: Serving = .{ .server = &server };
     {
-        const thread = try std.Thread.spawn(
-            .{},
-            Serving.run,
-            .{&serving},
-        );
+        const thread = try std.Thread.spawn(.{}, Serving.run, .{&serving});
         defer {
             server.requestStop();
             thread.join();
@@ -52,11 +47,7 @@ pub fn main(init: std.process.Init) !void {
     if (serving.failure) |err| return err;
 }
 
-fn request(
-    gpa: std.mem.Allocator,
-    port: u16,
-    bytes: []const u8,
-) ![]u8 {
+fn request(gpa: std.mem.Allocator, port: u16, bytes: []const u8) ![]u8 {
     const io = std.testing.io;
     const address = try std.Io.net.IpAddress.parse("127.0.0.1", port);
     const stream = try address.connect(io, .{ .mode = .stream });
@@ -69,7 +60,7 @@ fn request(
 }
 
 const endpoint_api = struct {
-    const ApiCall = zhtps.Call(@This());
+    const ApiCall = zhtps.Call(endpoint_api);
 
     pub const Services = struct {
         greeting: []const u8,
@@ -127,11 +118,7 @@ const endpoint_api = struct {
         const id = try call.paramInt(u32, "id");
         const input = try call.bodyJson(struct { name: []const u8 });
         call.metrics.add(.greetings_total, 1);
-        call.log(
-            .info,
-            "greeting_created",
-            .{ .id = id },
-        );
+        call.log(.info, "greeting_created", .{ .id = id });
         return try call.json(.created, .{
             .id = id,
             .name = input.name,
@@ -245,11 +232,7 @@ test "dependency serves HTTP with multiple workers and caller-controlled shutdow
     try testing.expectEqual(@as(?u16, null), server.adminPort());
 
     var serving: Serving = .{ .server = &server };
-    const thread = try std.Thread.spawn(
-        .{},
-        Serving.run,
-        .{&serving},
-    );
+    const thread = try std.Thread.spawn(.{}, Serving.run, .{&serving});
     {
         defer {
             server.requestStop();
@@ -262,16 +245,8 @@ test "dependency serves HTTP with multiple workers and caller-controlled shutdow
             "GET / HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n",
         );
         defer testing.allocator.free(root);
-        try testing.expect(std.mem.startsWith(
-            u8,
-            root,
-            "HTTP/1.1 200 OK\r\n",
-        ));
-        try testing.expect(std.mem.endsWith(
-            u8,
-            root,
-            "\r\n\r\nZHTPS\n",
-        ));
+        try testing.expect(std.mem.startsWith(u8, root, "HTTP/1.1 200 OK\r\n"));
+        try testing.expect(std.mem.endsWith(u8, root, "\r\n\r\nZHTPS\n"));
         const echo = try request(
             testing.allocator,
             server.port(),
@@ -279,16 +254,8 @@ test "dependency serves HTTP with multiple workers and caller-controlled shutdow
                 "Connection: close\r\n\r\nfrom consumer",
         );
         defer testing.allocator.free(echo);
-        try testing.expect(std.mem.startsWith(
-            u8,
-            echo,
-            "HTTP/1.1 200 OK\r\n",
-        ));
-        try testing.expect(std.mem.endsWith(
-            u8,
-            echo,
-            "\r\n\r\nfrom consumer",
-        ));
+        try testing.expect(std.mem.startsWith(u8, echo, "HTTP/1.1 200 OK\r\n"));
+        try testing.expect(std.mem.endsWith(u8, echo, "\r\n\r\nfrom consumer"));
     }
     try testing.expectEqual(@as(?zhtps.RunError, null), serving.failure);
     try testing.expectError(error.AlreadyServed, server.serve());
@@ -301,11 +268,7 @@ test "dependency worker placement leaves endpoint executors on the inherited mas
     var cpu: usize = 0;
     while (!zhtps.platform.cpuAllowed(&original, cpu)) : (cpu += 1) {}
     var mapping_buffer: [16]u8 = undefined;
-    const mapping = try std.fmt.bufPrint(
-        &mapping_buffer,
-        "{d}",
-        .{cpu},
-    );
+    const mapping = try std.fmt.bufPrint(&mapping_buffer, "{d}", .{cpu});
     const api = struct {
         const ApiCall = zhtps.Call(@This());
 
@@ -341,11 +304,7 @@ test "dependency worker placement leaves endpoint executors on the inherited mas
     );
     defer server.deinit();
     var host: Host = .{ .server = &server };
-    const thread = try std.Thread.spawn(
-        .{},
-        Host.run,
-        .{&host},
-    );
+    const thread = try std.Thread.spawn(.{}, Host.run, .{&host});
     {
         defer {
             server.requestStop();
@@ -357,16 +316,8 @@ test "dependency worker placement leaves endpoint executors on the inherited mas
             "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
         );
         defer testing.allocator.free(response);
-        try testing.expect(std.mem.startsWith(
-            u8,
-            response,
-            "HTTP/1.1 200 OK\r\n",
-        ));
-        const boundary = std.mem.indexOf(
-            u8,
-            response,
-            "\r\n\r\n",
-        ).? + 4;
+        try testing.expect(std.mem.startsWith(u8, response, "HTTP/1.1 200 OK\r\n"));
+        const boundary = std.mem.indexOf(u8, response, "\r\n\r\n").? + 4;
         const mask = try std.json.parseFromSlice(
             zhtps.platform.linux.cpu_set_t,
             testing.allocator,
@@ -400,7 +351,11 @@ test "dependency automatically sizes generated executors within inherited affini
         server.requestStop();
         thread.join();
     }
-    const response = try request(testing.allocator, server.adminPort().?, "GET /debug/config HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
+    const response = try request(
+        testing.allocator,
+        server.adminPort().?,
+        "GET /debug/config HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
     defer testing.allocator.free(response);
     try testing.expect(std.mem.startsWith(u8, response, "HTTP/1.1 200 OK\r\n"));
     const boundary = std.mem.indexOf(u8, response, "\r\n\r\n").? + 4;
@@ -440,11 +395,7 @@ test "dependency serves generated endpoints with middleware services and metrics
     defer server.deinit();
 
     var serving: EndpointServing = .{ .server = &server };
-    const thread = try std.Thread.spawn(
-        .{},
-        EndpointServing.run,
-        .{&serving},
-    );
+    const thread = try std.Thread.spawn(.{}, EndpointServing.run, .{&serving});
     defer {
         server.requestStop();
         thread.join();
@@ -460,11 +411,7 @@ test "dependency serves generated endpoints with middleware services and metrics
             "Connection: close\r\n\r\n{\"name\":\"zig\"}",
     );
     defer testing.allocator.free(unauthorized);
-    try testing.expect(std.mem.startsWith(
-        u8,
-        unauthorized,
-        "HTTP/1.1 401 Unauthorized\r\n",
-    ));
+    try testing.expect(std.mem.startsWith(u8, unauthorized, "HTTP/1.1 401 Unauthorized\r\n"));
 
     const response = try request(
         testing.allocator,
@@ -474,11 +421,7 @@ test "dependency serves generated endpoints with middleware services and metrics
             "Content-Length: 14\r\nConnection: close\r\n\r\n{\"name\":\"zig\"}",
     );
     defer testing.allocator.free(response);
-    try testing.expect(std.mem.startsWith(
-        u8,
-        response,
-        "HTTP/1.1 201 Created\r\n",
-    ));
+    try testing.expect(std.mem.startsWith(u8, response, "HTTP/1.1 201 Created\r\n"));
     try testing.expect(std.mem.endsWith(
         u8,
         response,
@@ -489,11 +432,7 @@ test "dependency serves generated endpoints with middleware services and metrics
         .port = server.port(),
         .bytes = "GET /slow HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n",
     };
-    const slow_thread = try std.Thread.spawn(
-        .{},
-        BackgroundRequest.run,
-        .{&slow_request},
-    );
+    const slow_thread = try std.Thread.spawn(.{}, BackgroundRequest.run, .{&slow_request});
     while (!services.slow_started.load(.acquire)) std.Thread.yield() catch {};
     const fast_started = zhtps.platform.monotonicNs();
     const fast_response = try request(
@@ -503,20 +442,12 @@ test "dependency serves generated endpoints with middleware services and metrics
     );
     const fast_duration = zhtps.platform.monotonicNs() - fast_started;
     defer testing.allocator.free(fast_response);
-    try testing.expect(std.mem.startsWith(
-        u8,
-        fast_response,
-        "HTTP/1.1 200 OK\r\n",
-    ));
+    try testing.expect(std.mem.startsWith(u8, fast_response, "HTTP/1.1 200 OK\r\n"));
     try testing.expect(fast_duration < 300 * std.time.ns_per_ms);
     slow_thread.join();
     try testing.expect(!slow_request.failed);
     defer testing.allocator.free(slow_request.response.?);
-    try testing.expect(std.mem.startsWith(
-        u8,
-        slow_request.response.?,
-        "HTTP/1.1 200 OK\r\n",
-    ));
+    try testing.expect(std.mem.startsWith(u8, slow_request.response.?, "HTTP/1.1 200 OK\r\n"));
 
     var first_timeout: BackgroundRequest = .{
         .port = server.port(),
@@ -553,11 +484,7 @@ test "dependency serves generated endpoints with middleware services and metrics
         "GET /fast HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n",
     );
     defer testing.allocator.free(after_timeout);
-    try testing.expect(std.mem.startsWith(
-        u8,
-        after_timeout,
-        "HTTP/1.1 200 OK\r\n",
-    ));
+    try testing.expect(std.mem.startsWith(u8, after_timeout, "HTTP/1.1 200 OK\r\n"));
 
     const metrics = try request(
         testing.allocator,
@@ -565,11 +492,7 @@ test "dependency serves generated endpoints with middleware services and metrics
         "GET /metrics HTTP/1.1\r\nHost: admin\r\nConnection: close\r\n\r\n",
     );
     defer testing.allocator.free(metrics);
-    try testing.expect(std.mem.indexOf(
-        u8,
-        metrics,
-        "embedded_greetings_total 1\n",
-    ) != null);
+    try testing.expect(std.mem.indexOf(u8, metrics, "embedded_greetings_total 1\n") != null);
     try testing.expect(std.mem.indexOf(
         u8,
         metrics,
@@ -592,27 +515,11 @@ test "dependency serves generated endpoints with middleware services and metrics
     const log_deadline = zhtps.platform.monotonicNs() + std.time.ns_per_s;
     var observed_logs = false;
     while (zhtps.platform.monotonicNs() < log_deadline) {
-        const log_len = try log_file.readPositionalAll(
-            testing.io,
-            &log_buffer,
-            0,
-        );
+        const log_len = try log_file.readPositionalAll(testing.io, &log_buffer, 0);
         const log_bytes = log_buffer[0..log_len];
-        observed_logs = std.mem.indexOf(
-            u8,
-            log_bytes,
-            "\"event\":\"greeting_created\"",
-        ) != null and
-            std.mem.indexOf(
-                u8,
-                log_bytes,
-                "\"route\":\"greet\",\"fields\":{\"id\":7}",
-            ) != null and
-            std.mem.indexOf(
-                u8,
-                log_bytes,
-                "\"event\":\"request_complete\"",
-            ) != null and
+        observed_logs = std.mem.indexOf(u8, log_bytes, "\"event\":\"greeting_created\"") != null and
+            std.mem.indexOf(u8, log_bytes, "\"route\":\"greet\",\"fields\":{\"id\":7}") != null and
+            std.mem.indexOf(u8, log_bytes, "\"event\":\"request_complete\"") != null and
             std.mem.indexOf(
                 u8,
                 log_bytes,
@@ -683,11 +590,7 @@ test "dependency unwinds every startup allocation failure" {
             defer server.deinit();
         }
     };
-    try std.testing.checkAllAllocationFailures(
-        std.testing.allocator,
-        fixture.initialize,
-        .{},
-    );
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, fixture.initialize, .{});
 }
 
 test "dependency returns startup errors and releases a partially bound listener" {
@@ -700,11 +603,7 @@ test "dependency returns startup errors and releases a partially bound listener"
             .workers = 0,
         },
     ));
-    const reserved = try zhtps.platform.listen(
-        "127.0.0.1",
-        0,
-        .{},
-    );
+    const reserved = try zhtps.platform.listen("127.0.0.1", 0, .{});
     zhtps.platform.close(reserved.fd);
     try testing.expectError(error.InvalidAddress, server.init(
         testing.allocator,
@@ -715,11 +614,7 @@ test "dependency returns startup errors and releases a partially bound listener"
             .max_connections = 1,
         },
     ));
-    const rebound = try zhtps.platform.listen(
-        "127.0.0.1",
-        reserved.port,
-        .{},
-    );
+    const rebound = try zhtps.platform.listen("127.0.0.1", reserved.port, .{});
     defer zhtps.platform.close(rebound.fd);
 }
 
@@ -727,11 +622,7 @@ test "dependency writes JSON to a borrowed log file and leaves it open" {
     const testing = std.testing;
     var temporary = testing.tmpDir(.{});
     defer temporary.cleanup();
-    const file = try temporary.dir.createFile(
-        testing.io,
-        "events.jsonl",
-        .{ .read = true },
-    );
+    const file = try temporary.dir.createFile(testing.io, "events.jsonl", .{ .read = true });
     defer file.close(testing.io);
     {
         var server: zhtps.DefaultServer = undefined;
@@ -747,11 +638,7 @@ test "dependency writes JSON to a borrowed log file and leaves it open" {
         );
         defer server.deinit();
         var serving: Serving = .{ .server = &server };
-        const thread = try std.Thread.spawn(
-            .{},
-            Serving.run,
-            .{&serving},
-        );
+        const thread = try std.Thread.spawn(.{}, Serving.run, .{&serving});
         {
             defer {
                 server.requestStop();
@@ -763,33 +650,16 @@ test "dependency writes JSON to a borrowed log file and leaves it open" {
                 "GET / HTTP/1.1\r\nHost: example\r\nConnection: close\r\n\r\n",
             );
             defer testing.allocator.free(response);
-            try testing.expect(std.mem.endsWith(
-                u8,
-                response,
-                "\r\n\r\nZHTPS\n",
-            ));
+            try testing.expect(std.mem.endsWith(u8, response, "\r\n\r\nZHTPS\n"));
         }
         try testing.expectEqual(@as(?zhtps.RunError, null), serving.failure);
     }
     var buffer: [8192]u8 = undefined;
-    const len = try file.readPositionalAll(
-        testing.io,
-        &buffer,
-        0,
-    );
-    var lines = std.mem.tokenizeScalar(
-        u8,
-        buffer[0..len],
-        '\n',
-    );
+    const len = try file.readPositionalAll(testing.io, &buffer, 0);
+    var lines = std.mem.tokenizeScalar(u8, buffer[0..len], '\n');
     var listening = false;
     while (lines.next()) |line| {
-        const parsed = try std.json.parseFromSlice(
-            std.json.Value,
-            testing.allocator,
-            line,
-            .{},
-        );
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, line, .{});
         defer parsed.deinit();
         if (std.mem.eql(
             u8,
@@ -825,11 +695,7 @@ test "dependency aggregates without allocating after server initialization" {
     failing.fail_index = failing.alloc_index;
     failing.resize_fail_index = failing.resize_index;
     var serving: Serving = .{ .server = &server };
-    const thread = try std.Thread.spawn(
-        .{},
-        Serving.run,
-        .{&serving},
-    );
+    const thread = try std.Thread.spawn(.{}, Serving.run, .{&serving});
     {
         defer {
             server.requestStop();
@@ -837,28 +703,16 @@ test "dependency aggregates without allocating after server initialization" {
         }
         const pipeline = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n" ** 32 ++
             "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
-        const response = try request(
-            testing.allocator,
-            server.port(),
-            pipeline,
-        );
+        const response = try request(testing.allocator, server.port(), pipeline);
         defer testing.allocator.free(response);
-        try testing.expectEqual(@as(usize, 33), std.mem.count(
-            u8,
-            response,
-            "HTTP/1.1 200 OK\r\n",
-        ));
+        try testing.expectEqual(@as(usize, 33), std.mem.count(u8, response, "HTTP/1.1 200 OK\r\n"));
         const metrics_response = try request(
             testing.allocator,
             server.adminPort().?,
             "GET /debug/metrics HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
         );
         defer testing.allocator.free(metrics_response);
-        const boundary = std.mem.indexOf(
-            u8,
-            metrics_response,
-            "\r\n\r\n",
-        ).? + 4;
+        const boundary = std.mem.indexOf(u8, metrics_response, "\r\n\r\n").? + 4;
         const captured = try std.json.parseFromSlice(
             std.json.Value,
             testing.allocator,
@@ -912,11 +766,7 @@ test "dependency preserves custom cleanup and access metadata with batching conf
     };
     var temporary = testing.tmpDir(.{});
     defer temporary.cleanup();
-    const file = try temporary.dir.createFile(
-        testing.io,
-        "custom.jsonl",
-        .{ .read = true },
-    );
+    const file = try temporary.dir.createFile(testing.io, "custom.jsonl", .{ .read = true });
     defer file.close(testing.io);
     var services: api.Services = .{};
     var server: App.Server = undefined;
@@ -936,11 +786,7 @@ test "dependency preserves custom cleanup and access metadata with batching conf
     );
     defer server.deinit();
     var host: Host = .{ .server = &server };
-    const thread = try std.Thread.spawn(
-        .{},
-        Host.run,
-        .{&host},
-    );
+    const thread = try std.Thread.spawn(.{}, Host.run, .{&host});
     {
         defer {
             server.requestStop();
@@ -953,32 +799,16 @@ test "dependency preserves custom cleanup and access metadata with batching conf
                 "GET / HTTP/1.1\r\nHost: localhost\r\nX-Tag: second\r\nConnection: close\r\n\r\n",
         );
         defer testing.allocator.free(response);
-        try testing.expectEqual(@as(usize, 2), std.mem.count(
-            u8,
-            response,
-            "HTTP/1.1 200 OK\r\n",
-        ));
-        try testing.expect(std.mem.indexOf(
-            u8,
-            response,
-            "\r\n\r\nfirstHTTP/1.1",
-        ) != null);
-        try testing.expect(std.mem.endsWith(
-            u8,
-            response,
-            "\r\n\r\nsecond",
-        ));
+        try testing.expectEqual(@as(usize, 2), std.mem.count(u8, response, "HTTP/1.1 200 OK\r\n"));
+        try testing.expect(std.mem.indexOf(u8, response, "\r\n\r\nfirstHTTP/1.1") != null);
+        try testing.expect(std.mem.endsWith(u8, response, "\r\n\r\nsecond"));
         const inspection = try request(
             testing.allocator,
             server.adminPort().?,
             "GET /debug/workers HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
         );
         defer testing.allocator.free(inspection);
-        const boundary = std.mem.indexOf(
-            u8,
-            inspection,
-            "\r\n\r\n",
-        ).? + 4;
+        const boundary = std.mem.indexOf(u8, inspection, "\r\n\r\n").? + 4;
         const captured = try std.json.parseFromSlice(
             std.json.Value,
             testing.allocator,
@@ -992,32 +822,15 @@ test "dependency preserves custom cleanup and access metadata with batching conf
     try testing.expectEqual(@as(?zhtps.RunError, null), host.failure);
     try testing.expectEqual(@as(usize, 2), services.releases.load(.monotonic));
     var buffer: [8192]u8 = undefined;
-    const len = try file.readPositionalAll(
-        testing.io,
-        &buffer,
-        0,
-    );
-    var lines = std.mem.tokenizeScalar(
-        u8,
-        buffer[0..len],
-        '\n',
-    );
+    const len = try file.readPositionalAll(testing.io, &buffer, 0);
+    var lines = std.mem.tokenizeScalar(u8, buffer[0..len], '\n');
     const expected = [_][]const u8{ "first", "second" };
     var count: usize = 0;
     while (lines.next()) |line| {
-        const parsed = try std.json.parseFromSlice(
-            std.json.Value,
-            testing.allocator,
-            line,
-            .{},
-        );
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, line, .{});
         defer parsed.deinit();
         const record = parsed.value.object;
-        if (!std.mem.eql(
-            u8,
-            record.get("event").?.string,
-            "request_complete",
-        )) continue;
+        if (!std.mem.eql(u8, record.get("event").?.string, "request_complete")) continue;
         if (record.get("route") == null) continue;
         try testing.expect(count < expected.len);
         try testing.expectEqualStrings(
@@ -1048,9 +861,5 @@ test "dependency unwinds response batch pool allocation failures" {
             defer server.deinit();
         }
     };
-    try std.testing.checkAllAllocationFailures(
-        std.testing.allocator,
-        harness.exercise,
-        .{},
-    );
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, harness.exercise, .{});
 }

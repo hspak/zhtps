@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const Metrics = @import("../Metrics.zig");
-const log = std.log.scoped(.metrics_prometheus);
 
 pub const content_type = "text/plain; version=0.0.4; charset=utf-8";
 
@@ -71,11 +70,7 @@ test "prometheus metrics expose status counts and cumulative latency buckets" {
         "zhtps_request_duration_seconds_count 2\n",
         "zhtps_request_duration_seconds_sum 0.000021\n",
     }) |expected| {
-        try testing.expect(std.mem.indexOf(
-            u8,
-            output,
-            expected,
-        ) != null);
+        try testing.expect(std.mem.indexOf(u8, output, expected) != null);
     }
 
     metrics.observe(.request_duration_seconds, 2_000_000_000);
@@ -87,10 +82,6 @@ test "prometheus metrics expose status counts and cumulative latency buckets" {
         "zhtps_request_duration_seconds_bucket{le=\"+Inf\"} 3\n",
         "zhtps_request_duration_seconds_count 3\n",
     }) |expected| {
-        try testing.expect(std.mem.indexOf(
-            u8,
-            writer.buffered(),
-            expected,
-        ) != null);
+        try testing.expect(std.mem.indexOf(u8, writer.buffered(), expected) != null);
     }
 }

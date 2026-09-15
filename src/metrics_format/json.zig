@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const Metrics = @import("../Metrics.zig");
-const log = std.log.scoped(.metrics_json);
 
 pub const content_type = "application/json";
 
@@ -73,11 +72,7 @@ test "json metrics preserve names and raw histogram units" {
     var buffer: [16 * 1024]u8 = undefined;
     var writer: std.Io.Writer = .fixed(&buffer);
     try write(&snapshot, &writer);
-    try testing.expect(std.mem.endsWith(
-        u8,
-        writer.buffered(),
-        "\n",
-    ));
+    try testing.expect(std.mem.endsWith(u8, writer.buffered(), "\n"));
     const parsed = try std.json.parseFromSlice(
         std.json.Value,
         testing.allocator,

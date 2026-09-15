@@ -1,7 +1,6 @@
 //! Shared HTTP field and URI grammar. All string slices borrow their input.
 
 const std = @import("std");
-const log = std.log.scoped(.http_syntax);
 
 /// Accepts one HTTP token character; separators and controls are rejected.
 pub fn isTokenByte(c: u8) bool {
@@ -56,11 +55,7 @@ pub fn isField(bytes: []const u8) bool {
 
 /// Borrows bytes with leading and trailing HTTP optional whitespace removed.
 pub fn trim(bytes: []const u8) []const u8 {
-    return std.mem.trim(
-        u8,
-        bytes,
-        " \t",
-    );
+    return std.mem.trim(u8, bytes, " \t");
 }
 
 /// Compares ASCII case-insensitively, as required for HTTP field names and tokens.
@@ -74,19 +69,11 @@ pub fn isHex(c: u8) bool {
 }
 
 fn isUnreserved(c: u8) bool {
-    return std.ascii.isAlphanumeric(c) or std.mem.indexOfScalar(
-        u8,
-        "-._~",
-        c,
-    ) != null;
+    return std.ascii.isAlphanumeric(c) or std.mem.indexOfScalar(u8, "-._~", c) != null;
 }
 
 fn isSubDelimiter(c: u8) bool {
-    return std.mem.indexOfScalar(
-        u8,
-        "!$&'()*+,;=",
-        c,
-    ) != null;
+    return std.mem.indexOfScalar(u8, "!$&'()*+,;=", c) != null;
 }
 
 /// Validates a URI reg-name or a path/query component without decoding it.
@@ -99,38 +86,22 @@ pub fn isUriComponent(bytes: []const u8, path: bool) bool {
                 return false;
             i += 2;
         } else if (!isUnreserved(c) and !isSubDelimiter(c)) {
-            if (!path or std.mem.indexOfScalar(
-                u8,
-                ":@/?",
-                c,
-            ) == null) return false;
+            if (!path or std.mem.indexOfScalar(u8, ":@/?", c) == null) return false;
         }
     }
     return true;
 }
 
 /// Empty authority is valid for Host, but not for an absolute HTTP URI or CONNECT.
-pub fn isAuthority(
-    bytes: []const u8,
-    require_port: bool,
-    allow_empty: bool,
-) bool {
+pub fn isAuthority(bytes: []const u8, require_port: bool, allow_empty: bool) bool {
     if (bytes.len == 0) return allow_empty and !require_port;
     var port: ?[]const u8 = null;
     if (bytes[0] == '[') {
-        const end = std.mem.indexOfScalar(
-            u8,
-            bytes,
-            ']',
-        ) orelse return false;
+        const end = std.mem.indexOfScalar(u8, bytes, ']') orelse return false;
         const literal = bytes[1..end];
         if (literal.len == 0) return false;
         if (literal[0] == 'v' or literal[0] == 'V') {
-            const dot = std.mem.indexOfScalar(
-                u8,
-                literal,
-                '.',
-            ) orelse return false;
+            const dot = std.mem.indexOfScalar(u8, literal, '.') orelse return false;
             if (dot < 2 or dot + 1 == literal.len) return false;
             for (literal[1..dot]) |c| if (!isHex(c)) return false;
             for (literal[dot + 1 ..]) |c| {
@@ -144,11 +115,7 @@ pub fn isAuthority(
             port = bytes[end + 2 ..];
         }
     } else {
-        const colon = std.mem.indexOfScalar(
-            u8,
-            bytes,
-            ':',
-        );
+        const colon = std.mem.indexOfScalar(u8, bytes, ':');
         const host = bytes[0 .. colon orelse bytes.len];
         if (host.len == 0 or !isUriComponent(host, false)) return false;
         if (colon) |at| port = bytes[at + 1 ..];
@@ -183,11 +150,7 @@ test "authority validates IPv6 literals, ports, and reg-name escapes" {
         "[::1]:80",
         "[v1.test:address]:443",
         "ex%61mple.com",
-    }) |valid| try testing.expect(isAuthority(
-        valid,
-        false,
-        false,
-    ));
+    }) |valid| try testing.expect(isAuthority(valid, false, false));
     for ([_][]const u8{
         "user@example.com",
         "[bad]:80",
@@ -195,19 +158,7 @@ test "authority validates IPv6 literals, ports, and reg-name escapes" {
         "host:80:90",
         "host/path",
         "host%GG",
-    }) |invalid| try testing.expect(!isAuthority(
-        invalid,
-        false,
-        false,
-    ));
-    try testing.expect(!isAuthority(
-        "host",
-        true,
-        false,
-    ));
-    try testing.expect(isAuthority(
-        "",
-        false,
-        true,
-    ));
+    }) |invalid| try testing.expect(!isAuthority(invalid, false, false));
+    try testing.expect(!isAuthority("host", true, false));
+    try testing.expect(isAuthority("", false, true));
 }

@@ -3,7 +3,6 @@
 const std = @import("std");
 const zhtps = @import("zhtps");
 const linux = zhtps.platform.linux;
-const log = std.log.scoped(.main);
 
 var stopping: std.atomic.Value(bool) = .init(false);
 
@@ -13,11 +12,7 @@ fn stopSignal(_: linux.SIG) callconv(.c) void {
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len == 2 and std.mem.eql(
-        u8,
-        args[1],
-        "--help",
-    )) {
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--help")) {
         try std.Io.File.stdout().writeStreamingAll(
             init.io,
             "ZHTPS — Linux x86-64-v4 io_uring HTTP/1.1 and HTTP/2 server\n" ++
@@ -71,22 +66,9 @@ pub fn main(init: std.process.Init) !void {
         .mask = std.mem.zeroes(linux.sigset_t),
         .flags = 0,
     };
-    _ = try zhtps.platform.check(linux.sigaction(
-        .TERM,
-        &action,
-        null,
-    ));
-    _ = try zhtps.platform.check(linux.sigaction(
-        .INT,
-        &action,
-        null,
-    ));
-    zhtps.DefaultServer.run(
-        init.gpa,
-        init.io,
-        config,
-        &stopping,
-    ) catch |err| {
+    _ = try zhtps.platform.check(linux.sigaction(.TERM, &action, null));
+    _ = try zhtps.platform.check(linux.sigaction(.INT, &action, null));
+    zhtps.DefaultServer.run(init.gpa, init.io, config, &stopping) catch |err| {
         try fatal(init.io, @errorName(err));
         std.process.exit(1);
     };

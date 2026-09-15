@@ -3,7 +3,6 @@
 const std = @import("std");
 const http = @import("../http.zig");
 const syntax = @import("syntax.zig");
-const log = std.log.scoped(.http_request);
 const Request = @This();
 
 method: []const u8 = "",
@@ -47,33 +46,16 @@ pub const ParseError = error{
 /// Parses a complete CRLF-delimited request head into caller-owned header slots.
 /// All returned strings borrow `bytes`; keep both buffers stable until reset.
 pub fn parse(bytes: []const u8, slots: []http.Header) ParseError!Request {
-    var lines = std.mem.splitSequence(
-        u8,
-        bytes,
-        "\r\n",
-    );
+    var lines = std.mem.splitSequence(u8, bytes, "\r\n");
     const first = lines.next() orelse return error.InvalidRequestLine;
-    const space = std.mem.indexOfScalar(
-        u8,
-        first,
-        ' ',
-    ) orelse return error.InvalidRequestLine;
+    const space = std.mem.indexOfScalar(u8, first, ' ') orelse return error.InvalidRequestLine;
     const method = first[0..space];
     if (!syntax.isToken(method)) return error.InvalidMethod;
-    const last = std.mem.indexOfScalarPos(
-        u8,
-        first,
-        space + 1,
-        ' ',
-    ) orelse
+    const last = std.mem.indexOfScalarPos(u8, first, space + 1, ' ') orelse
         return error.InvalidRequestLine;
     const target = first[space + 1 .. last];
     const version = first[last + 1 ..];
-    if (version.len != 8 or !std.mem.startsWith(
-        u8,
-        version,
-        "HTTP/",
-    ) or
+    if (version.len != 8 or !std.mem.startsWith(u8, version, "HTTP/") or
         !std.ascii.isDigit(version[5]) or version[6] != '.' or !std.ascii.isDigit(version[7]))
         return error.InvalidRequestLine;
     if (version[5] != '1') return error.UnsupportedVersion;
@@ -103,36 +85,20 @@ pub fn parse(bytes: []const u8, slots: []http.Header) ParseError!Request {
         count += 1;
         if (syntax.eql(header.name, "host")) {
             if (host != null) return error.DuplicateHost;
-            if (!syntax.isAuthority(
-                header.value,
-                false,
-                true,
-            )) return error.InvalidHost;
+            if (!syntax.isAuthority(header.value, false, true)) return error.InvalidHost;
             host = header.value;
         } else if (syntax.eql(header.name, "content-length")) {
             if (request.content_length != null) return error.AmbiguousFraming;
             if (header.value.len == 0) return error.InvalidContentLength;
             for (header.value) |c| if (!std.ascii.isDigit(c)) return error.InvalidContentLength;
-            request.content_length = std.fmt.parseInt(
-                u64,
-                header.value,
-                10,
-            ) catch
+            request.content_length = std.fmt.parseInt(u64, header.value, 10) catch
                 return error.InvalidContentLength;
         } else if (syntax.eql(header.name, "transfer-encoding")) {
             if (v == .http_1_0) return error.InvalidTransferEncoding;
             transfer_seen = true;
-            try parseTransfer(
-                header.value,
-                &request.chunked,
-                &unsupported_coding,
-            );
+            try parseTransfer(header.value, &request.chunked, &unsupported_coding);
         } else if (syntax.eql(header.name, "connection")) {
-            var tokens = std.mem.splitScalar(
-                u8,
-                header.value,
-                ',',
-            );
+            var tokens = std.mem.splitScalar(u8, header.value, ',');
             while (tokens.next()) |part| {
                 const token = syntax.trim(part);
                 if (token.len == 0) continue;
@@ -141,11 +107,7 @@ pub fn parse(bytes: []const u8, slots: []http.Header) ParseError!Request {
                 if (syntax.eql(token, "keep-alive")) connection_keep_alive = true;
             }
         } else if (syntax.eql(header.name, "expect")) {
-            var expectations = std.mem.splitScalar(
-                u8,
-                header.value,
-                ',',
-            );
+            var expectations = std.mem.splitScalar(u8, header.value, ',');
             while (expectations.next()) |part| {
                 const expectation = syntax.trim(part);
                 if (expectation.len == 0) continue;
@@ -157,11 +119,7 @@ pub fn parse(bytes: []const u8, slots: []http.Header) ParseError!Request {
     if (!terminated) return error.InvalidHeader;
     request.headers = slots[0..count];
     if (v == .http_1_1 and host == null) return error.MissingHost;
-    if (request.scheme == null and !std.mem.eql(
-        u8,
-        request.method,
-        "CONNECT",
-    ))
+    if (request.scheme == null and !std.mem.eql(u8, request.method, "CONNECT"))
         request.authority = host orelse "";
     if (transfer_seen and request.content_length != null) return error.AmbiguousFraming;
     if (transfer_seen and !request.chunked) return error.InvalidTransferEncoding;
@@ -172,11 +130,7 @@ pub fn parse(bytes: []const u8, slots: []http.Header) ParseError!Request {
 
 /// Parses one field line without CRLF. Returned name and value borrow line.
 pub fn parseHeader(line: []const u8) ParseError!http.Header {
-    const colon = std.mem.indexOfScalar(
-        u8,
-        line,
-        ':',
-    ) orelse return error.InvalidHeader;
+    const colon = std.mem.indexOfScalar(u8, line, ':') orelse return error.InvalidHeader;
     const name = line[0..colon];
     const value = syntax.trim(line[colon + 1 ..]);
     if (!syntax.isToken(name) or !syntax.isField(value)) return error.InvalidHeader;
@@ -228,11 +182,7 @@ pub fn forbidsTrailer(request: *const Request, name: []const u8) bool {
     }) |forbidden| if (syntax.eql(name, forbidden)) return true;
     for (request.headers) |field| {
         if (!syntax.eql(field.name, "connection")) continue;
-        var tokens = std.mem.splitScalar(
-            u8,
-            field.value,
-            ',',
-        );
+        var tokens = std.mem.splitScalar(u8, field.value, ',');
         while (tokens.next()) |token| if (syntax.eql(name, syntax.trim(token))) return true;
     }
     return false;
@@ -241,29 +191,13 @@ pub fn forbidsTrailer(request: *const Request, name: []const u8) bool {
 fn parseTarget(request: *Request) ParseError!void {
     const target = request.target;
     if (target.len == 0) return error.InvalidTarget;
-    if (std.mem.eql(
-        u8,
-        request.method,
-        "CONNECT",
-    )) {
-        if (!syntax.isAuthority(
-            target,
-            true,
-            false,
-        )) return error.InvalidTarget;
+    if (std.mem.eql(u8, request.method, "CONNECT")) {
+        if (!syntax.isAuthority(target, true, false)) return error.InvalidTarget;
         request.authority = target;
         return;
     }
-    if (std.mem.eql(
-        u8,
-        target,
-        "*",
-    )) {
-        if (!std.mem.eql(
-            u8,
-            request.method,
-            "OPTIONS",
-        )) return error.InvalidTarget;
+    if (std.mem.eql(u8, target, "*")) {
+        if (!std.mem.eql(u8, request.method, "OPTIONS")) return error.InvalidTarget;
         request.path = target;
         return;
     }
@@ -278,36 +212,20 @@ fn parseTarget(request: *Request) ParseError!void {
         if (!syntax.eql(scheme, "http") and !syntax.eql(scheme, "https"))
             return error.InvalidTarget;
         const rest = target[scheme_end + 3 ..];
-        const end = std.mem.indexOfAny(
-            u8,
-            rest,
-            "/?",
-        ) orelse rest.len;
-        if (!syntax.isAuthority(
-            rest[0..end],
-            false,
-            false,
-        )) return error.InvalidTarget;
+        const end = std.mem.indexOfAny(u8, rest, "/?") orelse rest.len;
+        if (!syntax.isAuthority(rest[0..end], false, false)) return error.InvalidTarget;
         request.authority = rest[0..end];
         request.scheme = scheme;
         path_query = rest[end..];
     }
     if (!syntax.isUriComponent(path_query, true)) return error.InvalidTarget;
-    const question = std.mem.indexOfScalar(
-        u8,
-        path_query,
-        '?',
-    );
+    const question = std.mem.indexOfScalar(u8, path_query, '?');
     const path = path_query[0 .. question orelse path_query.len];
     request.path = if (path.len == 0) "/" else path;
     if (question) |at| request.query = path_query[at + 1 ..];
 }
 
-fn parseTransfer(
-    bytes: []const u8,
-    chunked: *bool,
-    unsupported: *bool,
-) ParseError!void {
+fn parseTransfer(bytes: []const u8, chunked: *bool, unsupported: *bool) ParseError!void {
     var rest = syntax.trim(bytes);
     while (rest.len > 0) {
         if (rest[0] == ',') {

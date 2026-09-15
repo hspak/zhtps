@@ -6,7 +6,6 @@ const Tls = @import("Tls.zig");
 const platform = @import("platform.zig");
 const builtin_application = @import("application.zig");
 const worker = @import("server/worker.zig");
-const log = std.log.scoped(.server);
 
 pub const InitError = worker.RunError;
 pub const RunError = InitError || std.Thread.SpawnError || error{AlreadyServed};
@@ -45,12 +44,7 @@ pub fn Server(comptime App: type) type {
         ) InitError!void {
             if (comptime Worker.RuntimeInit != void)
                 @compileError("this application requires initApplication with its runtime value");
-            return self.initInner(
-                gpa,
-                io,
-                config,
-                {},
-            );
+            return self.initInner(gpa, io, config, {});
         }
 
         /// Binds every listener and allocates worker storage without starting threads.
@@ -66,12 +60,7 @@ pub fn Server(comptime App: type) type {
             config: Config,
             application: Worker.RuntimeInit,
         ) InitError!void {
-            return self.initInner(
-                gpa,
-                io,
-                config,
-                application,
-            );
+            return self.initInner(gpa, io, config, application);
         }
 
         fn initInner(
@@ -181,11 +170,7 @@ pub fn Server(comptime App: type) type {
                 for (self.threads[0..started]) |thread| thread.join();
             }
             for (self.threads, workers[1..]) |*thread, *item| {
-                thread.* = try std.Thread.spawn(
-                    .{},
-                    Worker.workerMain,
-                    .{item},
-                );
+                thread.* = try std.Thread.spawn(.{}, Worker.workerMain, .{item});
                 started += 1;
             }
             workers[0].workerMain();
@@ -228,11 +213,7 @@ pub fn Server(comptime App: type) type {
             stop: *const std.atomic.Value(bool),
         ) RunError!void {
             var instance: Self = undefined;
-            try instance.init(
-                gpa,
-                io,
-                config,
-            );
+            try instance.init(gpa, io, config);
             defer instance.deinit();
             for (instance.shared.workers) |*item| item.stop = stop;
             try instance.serve();
@@ -250,11 +231,7 @@ test "worker placement restores caller affinity after stop and loop error" {
     var cpu: usize = 0;
     while (!platform.cpuAllowed(&original, cpu)) : (cpu += 1) {}
     var buffer: [16]u8 = undefined;
-    const mapping = try std.fmt.bufPrint(
-        &buffer,
-        "{d}",
-        .{cpu},
-    );
+    const mapping = try std.fmt.bufPrint(&buffer, "{d}", .{cpu});
     for ([_]bool{ false, true }) |fail_loop| {
         var instance: Server(builtin_application) = undefined;
         instance.init(

@@ -2,11 +2,11 @@
 
 const std = @import("std");
 const linux = std.os.linux;
-const log = std.log.scoped(.checksum_cost);
 
 fn cpuNs() u64 {
     var time: linux.timespec = undefined;
-    std.debug.assert(linux.clock_gettime(.PROCESS_CPUTIME_ID, &time) == 0);
+    const result = linux.clock_gettime(.PROCESS_CPUTIME_ID, &time);
+    std.debug.assert(result == 0);
     return @as(u64, @intCast(time.sec)) * 1_000_000_000 + @as(u64, @intCast(time.nsec));
 }
 

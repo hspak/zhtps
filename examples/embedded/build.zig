@@ -1,7 +1,6 @@
 //! Build and exercise a separate consumer of the public library API.
 
 const std = @import("std");
-const log = std.log.scoped(.embedded_build);
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{ .default_target = .{
@@ -42,11 +41,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
     const run = b.addRunArtifact(exe);
     b.step("run", "Serve until Enter is pressed").dependOn(&run.step);
-    const filter = b.option(
-        []const u8,
-        "test-filter",
-        "Run tests whose names contain this text",
-    );
+    const filter = b.option([]const u8, "test-filter", "Run tests whose names contain this text");
     const tests = b.addTest(.{
         .root_module = main,
         .filters = if (filter) |name| &.{name} else &.{},
