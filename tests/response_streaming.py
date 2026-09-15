@@ -87,6 +87,26 @@ class StreamingTests(unittest.TestCase):
                     self.request(client, "/metadata")
                     self.assertEqual(client.response()[0], 200)
 
+    def test_static_files_get_head_and_conditional_response(self):
+        expected = Path("docs/testing.md").read_bytes()
+        for secure in (False, True):
+            with self.subTest(secure=secure), self.server(secure) as server:
+                with self.client(server, secure) as client:
+                    self.request(client, "/static/docs/testing.md")
+                    status, headers, body = client.response()
+                    self.assertEqual(status, 200)
+                    self.assertEqual(body, expected)
+                    self.request(client, "/static/docs/testing.md", method="HEAD")
+                    status, head, body = client.response(head=True)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(head[b"content-length"], str(len(expected)).encode())
+                    self.assertEqual(body, b"")
+                    client.send(b"GET /static/docs/testing.md HTTP/1.1\r\nHost: localhost\r\n"
+                                b"If-None-Match: " + headers[b"etag"] + b"\r\n\r\n")
+                    self.assertEqual(client.response()[0], 304)
+                    self.request(client, "/metadata")
+                    self.assertEqual(client.response()[0], 200)
+
     def test_head_bodyless_and_empty_skip_or_finish_production(self):
         for secure in (False, True):
             with self.subTest(secure=secure), self.server(secure) as server:

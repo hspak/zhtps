@@ -60,7 +60,7 @@ fn requestWithOptions(
     try writer.interface.writeAll(bytes);
     var buffer: [4096]u8 = undefined;
     var reader = stream.reader(testing.io, &buffer);
-    return reader.interface.allocRemaining(testing.allocator, .limited(64 * 1024));
+    return reader.interface.allocRemaining(testing.allocator, .limited(2 * 1024 * 1024));
 }
 
 const api = struct {
@@ -715,4 +715,375 @@ test "request scratch survives a running handler deadline and is reclaimed after
     try std.testing.expectEqual(@as(usize, 0), bytes.len);
     try std.testing.expect(services.intact);
     try std.testing.expectEqual(@as(usize, 1), services.releases);
+}
+
+const static_site = struct {
+    const C = zhtps.Call(@This());
+    pub const Services = struct { directory: std.Io.Dir };
+    pub const lanes = .{ .files = .{ .timeout_ms = 5000 } };
+
+    fn serve(call: *C) zhtps.EndpointError!zhtps.http.Response {
+        return call.serveDir(call.services.directory, .{
+            .index_file = if (call.header("No-Index") != null) null else "index.html",
+            .dotfiles = call.header("Dotfiles") != null,
+            .cache_control = "public, max-age=60",
+        });
+    }
+
+    pub const routes = .{
+        zhtps.get("/", serve),
+        zhtps.get("/:file", serve),
+        zhtps.get("/:dir/", serve),
+        zhtps.get("/:dir/:file", serve),
+        zhtps.get("/:dir/:sub/:file", serve),
+    };
+};
+
+test "static files stream beyond scratch capacity and support HEAD and revalidation" {
+    const testing = std.testing;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const payload = "0123456789abcdef" ** (16 * 1024);
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "large.bin", .data = payload });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "empty.txt", .data = "" });
+    var services: static_site.Services = .{ .directory = tmp.dir };
+    const result = try requestWithOptions(
+        static_site,
+        .{ .services = &services },
+        "HEAD /large.bin HTTP/1.1\r\nHost: local\r\n\r\n" ++
+            "GET /large.bin HTTP/1.1\r\nHost: local\r\n\r\n" ++
+            "GET /empty.txt HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    defer testing.allocator.free(result);
+    const head_end = std.mem.indexOf(
+        u8,
+        result,
+        "\r\n\r\n",
+    ).? + 4;
+    try testing.expect(std.mem.startsWith(
+        u8,
+        result[head_end..],
+        "HTTP/1.1 200",
+    ));
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result[0..head_end],
+        "Content-Length: 262144\r\n",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "Content-Type: application/octet-stream\r\n",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "Cache-Control: public, max-age=60\r\n",
+    ) != null);
+    const body_start = head_end + std.mem.indexOf(
+        u8,
+        result[head_end..],
+        "\r\n\r\n",
+    ).? + 4;
+    try testing.expectEqualStrings(payload, result[body_start..][0..payload.len]);
+    try testing.expect(std.mem.startsWith(
+        u8,
+        result[body_start + payload.len ..],
+        "HTTP/1.1 200",
+    ));
+    try testing.expect(std.mem.endsWith(
+        u8,
+        result,
+        "\r\n\r\n",
+    ));
+    const etag_start = std.mem.indexOf(
+        u8,
+        result,
+        "ETag: ",
+    ).? + 6;
+    const etag_end = std.mem.indexOfScalarPos(
+        u8,
+        result,
+        etag_start,
+        '\r',
+    ).?;
+    const date_start = std.mem.indexOf(
+        u8,
+        result,
+        "Last-Modified: ",
+    ).? + 15;
+    const date_end = std.mem.indexOfScalarPos(
+        u8,
+        result,
+        date_start,
+        '\r',
+    ).?;
+    const wire = try std.fmt.allocPrint(
+        testing.allocator,
+        "GET /large.bin HTTP/1.1\r\nHost: local\r\nIf-None-Match: {s}\r\n\r\n" ++
+            "GET /large.bin HTTP/1.1\r\nHost: local\r\nIf-Modified-Since: {s}\r\n\r\n" ++
+            "GET /large.bin HTTP/1.1\r\nHost: local\r\nIf-Match: \"wrong\"\r\n" ++
+            "Connection: close\r\n\r\n",
+        .{ result[etag_start..etag_end], result[date_start..date_end] },
+    );
+    defer testing.allocator.free(wire);
+    const conditional = try requestWithOptions(
+        static_site,
+        .{ .services = &services },
+        wire,
+    );
+    defer testing.allocator.free(conditional);
+    try testing.expectEqual(@as(usize, 2), std.mem.count(
+        u8,
+        conditional,
+        "HTTP/1.1 304",
+    ));
+    try testing.expectEqual(@as(usize, 1), std.mem.count(
+        u8,
+        conditional,
+        "HTTP/1.1 412",
+    ));
+    try testing.expect(std.mem.indexOf(
+        u8,
+        conditional,
+        payload[0..32],
+    ) == null);
+}
+
+test "static files serve index pages encoded names and safe directory redirects" {
+    const testing = std.testing;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "guide");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "index.html", .data = "<h1>Home</h1>" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "guide/index.html", .data = "<h1>Guide</h1>" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "hello world.CSS", .data = "body{}" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "literal%20.txt", .data = "once" });
+    var services: static_site.Services = .{ .directory = tmp.dir };
+    const result = try requestWithOptions(
+        static_site,
+        .{ .services = &services },
+        "GET / HTTP/1.1\r\nHost: local\r\n\r\n" ++
+            "GET /guide?version=1 HTTP/1.1\r\nHost: local\r\n\r\n" ++
+            "GET /guide/ HTTP/1.1\r\nHost: local\r\n\r\n" ++
+            "GET /hello%20world.CSS HTTP/1.1\r\nHost: local\r\n\r\n" ++
+            "GET /literal%2520.txt HTTP/1.1\r\nHost: local\r\n\r\n" ++
+            "GET /guide/ HTTP/1.1\r\nHost: local\r\nNo-Index: yes\r\nConnection: close\r\n\r\n",
+    );
+    defer testing.allocator.free(result);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "Content-Type: text/html; charset=utf-8\r\n",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "\r\n\r\n<h1>Home</h1>",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "HTTP/1.1 308",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "Location: /guide/?version=1\r\n",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "\r\n\r\n<h1>Guide</h1>",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "Content-Type: text/css; charset=utf-8\r\n",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "\r\n\r\nbody{}",
+    ) != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "\r\n\r\nonce",
+    ) != null);
+    try testing.expectEqual(@as(usize, 1), std.mem.count(
+        u8,
+        result,
+        "HTTP/1.1 404",
+    ));
+}
+
+test "static files hide traversal symlinks dotfiles directories and special files" {
+    const testing = std.testing;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "public/empty");
+    try tmp.dir.createDirPath(testing.io, "private");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "secret.txt", .data = "secret" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "private/key", .data = "secret" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "public/.env", .data = "hidden" });
+    try tmp.dir.symLink(
+        testing.io,
+        "../secret.txt",
+        "public/link",
+        .{},
+    );
+    try tmp.dir.symLink(
+        testing.io,
+        "../private",
+        "public/linked",
+        .{ .is_directory = true },
+    );
+    const directory = try tmp.dir.openDir(
+        testing.io,
+        "public",
+        .{},
+    );
+    defer directory.close(testing.io);
+    try testing.expectEqual(std.os.linux.E.SUCCESS, std.os.linux.errno(std.os.linux.mknodat(
+        directory.handle,
+        "pipe",
+        std.os.linux.S.IFIFO | 0o600,
+        0,
+    )));
+    var services: static_site.Services = .{ .directory = directory };
+    const paths = [_][]const u8{
+        "/missing",
+        "/.env",
+        "/%2eenv",
+        "/link",
+        "/linked/key",
+        "/empty",
+        "/pipe",
+        "/../secret.txt",
+        "/%2e%2e/secret.txt",
+        "/..%2fsecret.txt",
+        "/%5csecret.txt",
+        "/secret%00.txt",
+        "/%252e%252e/secret.txt",
+    };
+    for (paths) |path| {
+        const wire = try std.fmt.allocPrint(
+            testing.allocator,
+            "GET {s} HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+            .{path},
+        );
+        defer testing.allocator.free(wire);
+        const result = try requestWithOptions(
+            static_site,
+            .{ .services = &services },
+            wire,
+        );
+        defer testing.allocator.free(result);
+        try testing.expect(std.mem.startsWith(
+            u8,
+            result,
+            "HTTP/1.1 404",
+        ));
+        try testing.expect(std.mem.indexOf(
+            u8,
+            result,
+            "secret",
+        ) == null);
+        try testing.expect(std.mem.indexOf(
+            u8,
+            result,
+            "hidden",
+        ) == null);
+    }
+    const allowed = try requestWithOptions(
+        static_site,
+        .{ .services = &services },
+        "GET /.env HTTP/1.1\r\nHost: local\r\nDotfiles: yes\r\nConnection: close\r\n\r\n",
+    );
+    defer testing.allocator.free(allowed);
+    try testing.expect(std.mem.endsWith(
+        u8,
+        allowed,
+        "\r\n\r\nhidden",
+    ));
+}
+
+test "static directory mounts compose with groups middleware and explicit routes" {
+    const site = struct {
+        const C = zhtps.Call(@This());
+        pub const lanes = .{ .files = .{ .timeout_ms = 5000 } };
+        fn explicit(call: *C) zhtps.EndpointError!zhtps.http.Response {
+            return call.text(.ok, "explicit");
+        }
+        fn auth(call: *C) zhtps.EndpointError!?zhtps.http.Response {
+            if (call.header("Authorization") == null) return call.empty(.forbidden);
+            return null;
+        }
+        pub const routes = .{
+            zhtps.staticFiles(
+                @This(),
+                "/",
+                .{ .root = "../.." },
+            ),
+            zhtps.get("/README.md", explicit),
+            zhtps.group(.{
+                .prefix = "/docs",
+                .before = .{auth},
+                .routes = .{zhtps.staticFiles(@This(), "/", .{
+                    .root = "../../docs",
+                    .index_file = "README.md",
+                    .lane = .files,
+                })},
+            }),
+        };
+    };
+    const result = try request(site, "GET /README.md HTTP/1.1\r\nHost: local\r\n\r\n" ++
+        "POST /README.md HTTP/1.1\r\nHost: local\r\n\r\n" ++
+        "GET /docs/testing.md HTTP/1.1\r\nHost: local\r\n\r\n" ++
+        "OPTIONS /docs/testing.md HTTP/1.1\r\nHost: local\r\nAuthorization: yes\r\n\r\n" ++
+        "GET /docs HTTP/1.1\r\nHost: local\r\nAuthorization: yes\r\n\r\n" ++
+        "GET /docs/testing.md HTTP/1.1\r\nHost: local\r\nAuthorization: yes\r\n\r\n" ++
+        "GET /docstesting.md HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "\r\n\r\nexplicit",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "HTTP/1.1 405",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "HTTP/1.1 403",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "HTTP/1.1 204",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "Allow: GET, HEAD, OPTIONS\r\n",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "Location: /docs/\r\n",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "\r\n\r\n# Verification and load measurement",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result,
+        "HTTP/1.1 404",
+    ) != null);
 }

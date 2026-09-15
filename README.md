@@ -27,6 +27,8 @@ OpenSSL 3.5 LTS and libnghttp2 sources with Zig by default.
   evaluate entity-tag and modification-date preconditions with the public helper.
 - **Routing:** Normalized paths, named parameters, nested route groups, middleware,
   query/header access, and typed JSON request parsing.
+- **Static sites:** Directory mounts with index pages, content types, streaming,
+  HEAD and cache revalidation. See [static files](docs/endpoints.md#static-files).
 - **Response helpers:** Text, JSON, redirects, custom headers/statuses, and automatic
   Date and framing headers.
 - **TLS 1.3:** OpenSSL provides AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305,
@@ -128,30 +130,113 @@ See [runtime details](docs/runtime.md), [SIMD measurements](docs/simd.md),
 
 ## Knobs
 
-Start with `-Doptimize=ReleaseSafe` and measure successful throughput, p99 latency,
-errors, queueing, and memory under your actual workload.
+Start with `-Doptimize=ReleaseSafe` (the build default is `Debug`) and measure
+successful throughput, p99 latency, errors, queueing, and memory under your actual
+workload. The standalone executable accepts all of the flags below.
 
-- **Workers and CPUs:** Start with one worker, then add workers within the service's
-  CPU allocation while reserving CPU time for application lanes and NIC interrupts;
-  use `--worker-cpus` when placement measurements justify pinning.
-- **Connection and admission budgets:** `--max-connections`, `--max-active`, `--rate`,
-  `--burst`, and rejection budgets apply **per worker**; divide a process budget
-  across workers and leave headroom for uneven connection distribution.
-- **Application lanes:** A lane is a queue plus handler threads; `threads` and
-  `queue` are each multiplied by workers, so four workers with `threads = 2`
-  create eight threads for that lane, shared across the server.
-- **Match lanes to work:** Keep CPU-heavy concurrency within available CPU capacity,
-  size blocking lanes to downstream capacity, and give long-lived streams their own
-  lane with a thread per concurrent producer and a suitable `timeout_ms`.
-- **Memory and uploads:** Size `application_bytes` for buffered bodies **plus**
-  parsing/response scratch; use streaming for large bodies and budget
-  `large_buffer_bytes`, HTTP/2 streams, and `http2.memory_bytes` per worker.
-- **Latency and connection reuse:** Keep queues short enough to meet the lane's
-  total deadline (100 ms by default), tune read/write/idle limits to clients, and
-  enable `--idle-reclaim-ms` only when idle keepalives crowd out new connections.
+### Listeners and TLS
 
-The [configuration guide](docs/configuration.md) gives defaults, sizing examples,
-and workload tradeoffs; [observability](docs/observability.md) explains what to measure.
+- `--address IP` (default: `127.0.0.1`): Public listener address, IPv4 or IPv6.
+- `--port PORT` (default: `8080`): Public listener port; `0` chooses a free port.
+- `--admin-address IP` (default: `127.0.0.1`): Separate HTTP admin listener address.
+- `--admin-port PORT` (default: `9090`): Admin listener port; `0` chooses a free port.
+- `--tls-certificate PATH` (default: unset; TLS disabled): PEM certificate chain;
+  requires `--tls-key` to enable HTTPS on the public listener.
+- `--tls-key PATH` (default: unset): Unencrypted PEM private key matching
+  `--tls-certificate`; both paths are required for TLS.
+- `--tls-handshake-timeout-ms N` (default: `5000`): TLS handshake deadline in
+  milliseconds; requires the certificate and key options.
+
+### Workers and resource budgets
+
+Automatic sizing is enabled by default. Explicit numbers override individual
+choices; cgroup service limits take precedence over host capacity. Inspect the
+effective limits and sizing sources at `/debug/config`. See
+[automatic defaults](docs/configuration.md#automatic-defaults) for the policy.
+
+- `--workers N` (default: `auto`): Event-loop threads and io_uring rings, sized
+  within CPU, cgroup, memory, and descriptor limits, accounting for lane threads.
+- `--worker-cpus LIST` (default: automatic NIC placement when supported): Ordered logical CPU
+  IDs or ranges, such as `9,10-12`, with one distinct CPU per worker.
+- `--max-connections N` (default: `auto`): Public connection slots per worker.
+- `--memory-budget-bytes N` (default: 1/4 of detected available memory): Process
+  sizing allowance, constrained by remaining host and cgroup memory.
+- `--admin-connections N` (default: `8`): Reserved admin slots on worker zero;
+  `0` disables the admin listener.
+- `--completion-budget N` (default: `64`): Maximum completions processed per
+  event-loop iteration.
+- `--response-batches N` (default: `64`): Aggregate response buffers per worker for
+  the built-in application; `0` disables aggregation.
+- `--large-buffer-bytes N` (default: `auto`, up to 64 MiB): Leased large-buffer bytes
+  per worker; cached and small buffers are additional.
+- `--http2-max-streams N` (default: `100`): Concurrent HTTP/2 streams per connection.
+- `--http2-worker-streams N` (default: `auto`): Active or retained HTTP/2 streams per
+  worker, including reset streams whose application hooks have not returned.
+- `--http2-memory-bytes N` (default: `auto`, up to 64 MiB): HTTP/2 protocol, transport,
+  stream, and cached allocation budget per worker.
+
+### Admission
+
+These budgets apply **per worker**. Divide a process budget across workers and
+leave headroom for uneven connection distribution. Derived counts use public
+connection slots, excluding the admin reserve.
+
+- `--max-active N` (default: `max(1, floor(max-connections * 3 / 4))`): Maximum
+  active public requests per worker.
+- `--max-rejecting N` (default: `max(1, floor(max-connections / 8))`): Concurrent
+  rejection responses per worker; `0` closes excess requests without sending 503
+  responses.
+- `--rate N` (default: `0`, disabled): Admitted requests per second per worker.
+- `--burst N` (default: effective `--max-active`): Request
+  token-bucket capacity per worker when rate limiting is enabled.
+- `--rejection-rate N` (default: `1000`): Rejection responses per second per worker.
+
+### Timeouts and connection reuse
+
+All timeout and age values below are in milliseconds.
+
+- `--header-timeout-ms N` (default: `5000`): Request header deadline.
+- `--body-timeout-ms N` (default: `30000`): Request body deadline.
+- `--write-timeout-ms N` (default: `5000`): Response write deadline.
+- `--idle-timeout-ms N` (default: `15000`): Keepalive idle deadline.
+- `--tcp-retries MODE` (default: `thin-linear`): TCP retry policy for public sockets;
+  accepts `thin-linear` or `system`.
+- `--idle-reclaim-ms N` (default: `0`, disabled): Minimum completed keepalive idle
+  age before reclaiming a slot under pressure; must be below `--idle-timeout-ms`
+  when enabled.
+- `--close-timeout-ms N` (default: `100`): Bounded response drain deadline.
+- `--shutdown-keepalive-ms N` (default: `100`): Final-request window for established
+  public keepalives during shutdown, capped by `--shutdown-timeout-ms`; `0` closes
+  idle keepalives immediately.
+- `--shutdown-timeout-ms N` (default: `5000`): Graceful shutdown drain deadline.
+- `--max-requests N` (default: `1000`): Maximum requests per connection.
+
+### Request limits
+
+- `--max-body-bytes N` (default: `67108864`, 64 MiB): Server request body limit;
+  generated routes default to 64 KiB and may impose a smaller limit.
+- `--max-chunk-framing-bytes N` (default: `65536`, 64 KiB): Cumulative chunk framing
+  overhead limit per request.
+
+### Logging and help
+
+- `--log-slots N` (default: `256`): Buffered JSON log records per worker.
+- `--no-access-log` (default: off; access logging enabled): Omit per-response logs
+  while retaining metrics and other events.
+- `--verbose` (default: off): Include JSON debug events.
+- `--help` (default: off): Print usage and exit; pass this flag alone.
+
+Embedded applications also configure lanes and buffer sizes through the Zig API.
+Each lane defaults to `threads = 1`, `queue = 64`, and `timeout_ms = 100`; thread
+and queue counts are multiplied by workers and shared across the server. Keep
+CPU-heavy concurrency within available CPU capacity, size blocking lanes to
+downstream capacity, and give long-lived streams their own lane. The default
+`application_bytes` is 65536 (64 KiB) per live exchange; buffered bodies share it
+with parsing and response scratch, while streaming avoids retaining the whole body.
+
+The [configuration guide](docs/configuration.md) covers library settings, sizing
+examples, and workload tradeoffs; [observability](docs/observability.md) explains
+what to measure.
 
 ## Example
 
@@ -185,3 +270,17 @@ pub fn main(init: std.process.Init) !void {
 Run `zig build`, start your executable, and `curl http://127.0.0.1:8080/hello/Ada`
 to receive `{"hello":"Ada"}`. The embedding host owns signal handling; see
 [lifecycle and graceful shutdown](docs/embedding.md) and [more endpoint examples](docs/endpoints.md).
+
+To serve a static site, replace `api` with:
+
+```zig
+const api = struct {
+    pub const lanes = .{ .files = .{ .timeout_ms = 30_000 } };
+    pub const routes = .{
+        zhtps.staticFiles(@This(), "/", .{ .root = "public" }),
+    };
+};
+```
+
+Put your site's files in `public/`; `/` serves `public/index.html`. Use a prefix
+such as `/assets` to mount a directory alongside your API endpoints.

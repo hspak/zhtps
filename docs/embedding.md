@@ -61,7 +61,12 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-`init` binds all listeners and allocates worker storage. After it returns,
+`init` detects the calling thread's host and cgroup allocation, resolves automatic
+workers and resource budgets, then binds listeners and allocates worker storage.
+`Config{}` uses the same [automatic defaults](configuration.md#automatic-defaults)
+as the CLI. Explicit numeric fields override individual choices; use
+`Config.automatic` to restore startup sizing. The chosen CPU mapping is owned
+by the server; discovery is repeated for each initialization. After it returns,
 `server.port()` reports the public port, including when you requested port zero;
 `server.adminPort()` returns the admin port or null when disabled. `serve` blocks
 on the calling thread and starts any additional configured workers. Call
@@ -118,7 +123,9 @@ virtual-host authorization or trusted-proxy inference.
 Embedded `Config` literals use the same admission defaults as the CLI. Leave
 `config.admission.max_active`, `max_rejecting`, or `burst` null to derive them
 from the final connection budget at startup. `Config.resolveAdmission()` returns
-the validated, concrete `Admission.Options` for callers that need those limits.
+the validated, concrete `Admission.Options` when `max_connections` is numeric;
+otherwise it returns `UnresolvedResources`. Host discovery occurs in server
+initialization, before admission defaults are filled in.
 
 `http.Parser` and `http.Response` can be used independently of the runtime. The
 parser exposes explicit framing events and owns no allocator. The response

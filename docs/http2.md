@@ -62,8 +62,8 @@ close immediately.
 | Setting | Default | Scope |
 |---|---:|---|
 | `--http2-max-streams` / `Config.http2.max_streams` | 100 | Per connection, advertised in SETTINGS |
-| `--http2-worker-streams` / `max_streams_per_worker` | 256 | Live streams plus reset streams with running hooks, per worker |
-| `--http2-memory-bytes` / `memory_bytes` | 64 MiB | Protocol, transport, stream, and cached allocations, per worker |
+| `--http2-worker-streams` / `max_streams_per_worker` | Automatic, up to 256 | Live streams plus reset streams with running hooks, per worker |
+| `--http2-memory-bytes` / `memory_bytes` | Automatic, up to 64 MiB | Protocol, transport, stream, and cached allocations, per worker |
 | `Config.header_bytes` | 32 KiB | Decoded field-list charge, including HPACK's 32-byte field overhead |
 | `Config.trailer_bytes` | 8 KiB | Retained trailer names and values |
 | Receive window | 65,535 bytes | Buffered body bytes per stream |

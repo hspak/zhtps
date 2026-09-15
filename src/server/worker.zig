@@ -18,7 +18,7 @@ const Http2Allocator = @import("Http2Allocator.zig");
 const log = std.log.scoped(.server_worker);
 
 pub const RunError = std.mem.Allocator.Error ||
-    std.Thread.SpawnError || platform.Error || Config.Error || Tls.Error ||
+    std.Thread.SpawnError || platform.Error || Config.Error || Config.Resources.Error || Tls.Error ||
     error{
         IoUringUnavailable,
         IoUringOperationUnsupported,
@@ -96,6 +96,41 @@ pub fn Worker(comptime App: type) type {
         // send completion. Their storage must not be reset after merely copying.
         const can_batch = App == application;
         const Http2 = http2.Connection(App, Self);
+
+        /// Estimates transport-owned storage for startup sizing. Compiled record
+        /// sizes and bounded caches are exact; stack, socket, and TLS headroom
+        /// are allowances. Application-owned allocations remain outside this model.
+        pub fn resourceRequirements(config: Config) Config.Requirements {
+            const completion_bytes = if (isolated_application) @sizeOf(ApplicationExecutor.Completion) else 0;
+            var requirements: Config.Requirements = .{
+                .worker_bytes = @sizeOf(Self) + 1024 * 1024 + 64 * 1024 +
+                    64 * (@sizeOf(Request) + storageSize(config, false) + @sizeOf(BufferPool.Block)),
+                .connection_bytes = @sizeOf(Connection) + @sizeOf(Request) + @sizeOf(usize) +
+                    storageSize(config, false) + @sizeOf(BufferPool.Block) + completion_bytes +
+                    256 + 64 * 1024 + @as(u64, if (config.tls != null) 64 * 1024 else 0),
+                .admin_bytes = config.admin_connections *| (storageSize(config, true) +
+                    @sizeOf(Connection) + @sizeOf(Request) + @sizeOf(usize) + 64 * 1024),
+                .stream_bytes = @sizeOf(Http2.Stream) + config.application_bytes +
+                    config.header_bytes + config.trailer_bytes + config.response_bytes + 16 * 1024,
+                .stream_queue_bytes = completion_bytes,
+                .worker_fds = if (isolated_application) 4 else 3,
+            };
+            if (config.log_fd != null) requirements.worker_bytes +|= config.log_slots *| @sizeOf(Logger.Slot);
+            if (can_batch) requirements.worker_bytes +|= config.response_batches *| @sizeOf(ResponseBatch);
+            for (fullCapacities(config)) |size| {
+                const cached = @max(8, @min(64, 4 * 1024 * 1024 / size));
+                requirements.worker_bytes +|= cached *| (size + @sizeOf(BufferPool.Block));
+            }
+            if (comptime isolated_application) {
+                inline for (std.meta.tags(ApplicationLane)) |lane| {
+                    const options = App.laneOptions(lane);
+                    requirements.lane_threads +|= options.threads;
+                    requirements.worker_bytes +|= options.queue *| @sizeOf(ApplicationExecutor.Task);
+                    requirements.worker_bytes +|= options.threads *| (1024 * 1024 + @sizeOf(std.Thread));
+                }
+            }
+            return requirements;
+        }
 
         config: Config,
         io: std.Io,
@@ -681,6 +716,80 @@ pub fn Worker(comptime App: type) type {
                 std.Thread.yield() catch {};
             }
             if (shared.abort.load(.monotonic)) return;
+            if (self.worker_id == 0) {
+                if (self.config.resources) |resources| self.logger.emit(.{
+                    .timestamp_ns = platform.realtimeNs(self.io),
+                    .event = "resources_resolved",
+                    .fields = &.{
+                        .{ .name = "workers", .value = .{ .unsigned = self.config.workers } },
+                        .{ .name = "workers_source", .value = .{ .string = @tagName(resources.workers) } },
+                        .{ .name = "connections_per_worker", .value = .{ .unsigned = self.config.max_connections } },
+                        .{ .name = "connections_source", .value = .{ .string = @tagName(resources.connections) } },
+                        .{
+                            .name = "large_buffer_bytes_per_worker",
+                            .value = .{ .unsigned = self.config.large_buffer_bytes },
+                        },
+                        .{
+                            .name = "large_buffers_automatic",
+                            .value = .{ .boolean = resources.large_buffers_automatic },
+                        },
+                        .{
+                            .name = "http2_memory_bytes_per_worker",
+                            .value = .{ .unsigned = self.config.http2.memory_bytes },
+                        },
+                        .{
+                            .name = "http2_memory_automatic",
+                            .value = .{ .boolean = resources.http2_memory_automatic },
+                        },
+                        .{
+                            .name = "http2_streams_per_worker",
+                            .value = .{ .unsigned = self.config.http2.max_streams_per_worker },
+                        },
+                        .{
+                            .name = "http2_streams_automatic",
+                            .value = .{ .boolean = resources.http2_streams_automatic },
+                        },
+                        .{
+                            .name = "max_active_per_worker",
+                            .value = .{ .unsigned = self.config.admission.max_active.? },
+                        },
+                        .{
+                            .name = "max_rejecting_per_worker",
+                            .value = .{ .unsigned = self.config.admission.max_rejecting.? },
+                        },
+                        .{
+                            .name = "burst_per_worker",
+                            .value = .{ .unsigned = self.config.admission.burst.? },
+                        },
+                        .{
+                            .name = "threads_per_worker",
+                            .value = .{ .unsigned = resources.threads_per_worker },
+                        },
+                        .{ .name = "memory_budget_bytes", .value = .{ .unsigned = resources.memory_budget_bytes } },
+                        .{ .name = "estimated_bytes", .value = .{ .unsigned = resources.estimated_bytes } },
+                        .{ .name = "memory_source", .value = .{ .string = @tagName(resources.detected.memory_source) } },
+                        .{ .name = "cgroup", .value = .{ .string = @tagName(resources.detected.cgroup) } },
+                        .{
+                            .name = "placement_source",
+                            .value = .{ .string = @tagName(resources.detected.placement) },
+                        },
+                    },
+                });
+            }
+            // Individual CPU IDs keep placement records bounded even when an
+            // explicit mapping contains hundreds of CPUs or long numeric strings.
+            if (self.config.resources != null) self.logger.emit(.{
+                .timestamp_ns = platform.realtimeNs(self.io),
+                .event = "worker_resources_resolved",
+                .fields = &.{
+                    .{
+                        .name = "cpu",
+                        .value = if (self.worker_cpu) |cpu| .{ .unsigned = cpu } else .null,
+                    },
+                    .{ .name = "sq_entries", .value = .{ .unsigned = self.ring.sq.sqes.len } },
+                    .{ .name = "cq_entries", .value = .{ .unsigned = self.ring.cq.cqes.len } },
+                },
+            });
             if (self.worker_id == 0) {
                 self.logger.emit(.{
                     .timestamp_ns = platform.realtimeNs(self.io),

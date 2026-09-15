@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const Admission = @import("Admission.zig");
+pub const Resources = @import("Config/Resources.zig");
 const log = std.log.scoped(.config);
 const Config = @This();
 
@@ -12,11 +13,19 @@ tls: ?Tls = null,
 http2: Http2 = .{},
 admin_address: []const u8 = "127.0.0.1",
 admin_port: u16 = 9090,
-workers: usize = 1,
-/// Ordered logical CPU IDs, one per worker, such as "9,10-12". Empty inherits
-/// the serving thread's affinity. Borrows storage until server deinit.
+/// `automatic` sizes transport and application threads within the CPU allocation.
+workers: usize = automatic,
+/// Ordered logical CPU IDs, one per worker, such as "9,10-12". Empty permits
+/// NIC-aware placement; "inherit" keeps scheduler placement. Borrows storage
+/// until server deinit. Automatic worker counts follow an explicit mapping.
 worker_cpus: []const u8 = "",
-max_connections: usize = 256,
+/// Per worker. `automatic` derives capacity from memory and descriptor budgets.
+max_connections: usize = automatic,
+/// Process-wide sizing allowance; null uses one quarter of available memory
+/// within host and cgroup limits. This is a planning budget, not an RSS limiter.
+memory_budget_bytes: ?u64 = null,
+/// Populated by server initialization; includes inputs and reasons for sizing.
+resources: ?Resolution = null,
 /// Zero disables the admin listener and its reserved connection storage.
 admin_connections: usize = 8,
 header_bytes: usize = 32 * 1024,
@@ -31,7 +40,7 @@ application_bytes: usize = 64 * 1024,
 /// Per-worker bytes leased from large-buffer pools and response stream handoffs.
 /// Cached buffers are bounded separately by BufferPool's count/byte limits.
 /// Admin storage is reserved at startup.
-large_buffer_bytes: usize = 64 * 1024 * 1024,
+large_buffer_bytes: usize = automatic,
 max_body_bytes: u64 = 64 * 1024 * 1024,
 max_chunk_framing_bytes: u64 = 64 * 1024,
 header_timeout_ms: u32 = 5000,
@@ -62,6 +71,44 @@ verbose: bool = false,
 access_log: bool = true,
 admission: AdmissionOptions = .{},
 
+/// Selects startup sizing for workers, connections, large buffers, and HTTP/2
+/// worker limits. Zero retains its existing meaning for each option.
+pub const automatic = std.math.maxInt(usize);
+
+pub const Requirements = struct {
+    worker_bytes: u64,
+    connection_bytes: u64,
+    admin_bytes: u64,
+    stream_bytes: u64,
+    stream_queue_bytes: u64 = 0,
+    lane_threads: usize = 0,
+    worker_fds: usize = 3,
+};
+
+pub const Resolution = struct {
+    detected: Resources.Report,
+    memory_budget_bytes: u64,
+    estimated_bytes: u64,
+    threads_per_worker: usize,
+    workers: enum {
+        explicit,
+        cpu,
+        mapping,
+        memory,
+        descriptors,
+        threads,
+    },
+    connections: enum {
+        explicit,
+        memory,
+        descriptors,
+        implementation,
+    },
+    large_buffers_automatic: bool,
+    http2_memory_automatic: bool,
+    http2_streams_automatic: bool,
+};
+
 pub const TcpRetries = enum {
     system,
     thin_linear,
@@ -79,9 +126,9 @@ pub const Http2 = struct {
     /// Advertised per connection. Closed streams with running hooks still count
     /// against the worker limit until their application storage can be released.
     max_streams: u32 = 100,
-    max_streams_per_worker: usize = 256,
+    max_streams_per_worker: usize = automatic,
     /// Bounds protocol, stream, and transport allocations together per worker.
-    memory_bytes: usize = 64 * 1024 * 1024,
+    memory_bytes: usize = automatic,
 };
 
 /// Counts apply per worker. Null selects a default from the public connection
@@ -98,12 +145,17 @@ pub const Error = error{
     InvalidOption,
     MissingArgument,
     InvalidLimit,
+    UnresolvedResources,
+    MemoryBudgetExceeded,
+    DescriptorBudgetTooSmall,
+    ThreadBudgetExceeded,
 };
 
 /// Rejects unsupported limits and listener combinations without allocating or binding.
 pub fn validate(config: Config) Error!void {
     if (config.http2.max_streams == 0 or config.http2.max_streams > 65535 or
-        config.http2.max_streams_per_worker == 0 or config.http2.max_streams_per_worker > 65535 or
+        config.http2.max_streams_per_worker == 0 or
+        (config.http2.max_streams_per_worker != automatic and config.http2.max_streams_per_worker > 65535) or
         config.http2.memory_bytes < 1024 * 1024) return error.InvalidLimit;
     if (config.tls) |tls| {
         if (tls.certificate.len == 0 or tls.private_key.len == 0 or
@@ -119,10 +171,10 @@ pub fn validate(config: Config) Error!void {
             ) != null or
             tls.handshake_timeout_ms == 0) return error.InvalidOption;
     }
-    if (config.workers == 0 or config.workers > 256 or
-        config.max_connections == 0 or config.max_connections > 8176 or
+    if (config.workers == 0 or (config.workers != automatic and config.workers > 256) or
+        config.max_connections == 0 or (config.max_connections != automatic and config.max_connections > 8176) or
         config.admin_connections > 128 or
-        config.max_connections + config.admin_connections > 8176 or
+        (config.max_connections != automatic and config.max_connections + config.admin_connections > 8176) or
         config.header_bytes < 8192 or config.header_bytes > 1024 * 1024 or
         config.trailer_bytes < 2 or config.trailer_bytes > 1024 * 1024 or
         config.receive_bytes == 0 or config.receive_bytes > 1024 * 1024 or
@@ -140,13 +192,15 @@ pub fn validate(config: Config) Error!void {
         (config.admission.requests_per_second != 0 and config.admission.burst == 0))
         return error.InvalidLimit;
     if (config.log_fd) |fd| if (fd < 0) return error.InvalidLimit;
+    if (config.memory_budget_bytes == 0) return error.InvalidLimit;
     var cpus: [256]u16 = undefined;
     _ = try config.resolveWorkerCpus(&cpus);
     if (config.admission.max_active) |limit| {
-        if (limit == 0 or limit > config.max_connections) return error.InvalidLimit;
+        if (limit == 0 or limit > @min(config.max_connections, 8176 - config.admin_connections))
+            return error.InvalidLimit;
     }
     if (config.admission.max_rejecting) |limit| {
-        if (limit > config.max_connections) return error.InvalidLimit;
+        if (limit > @min(config.max_connections, 8176 - config.admin_connections)) return error.InvalidLimit;
     }
 }
 
@@ -154,7 +208,7 @@ pub fn validate(config: Config) Error!void {
 /// preserves scheduler placement; otherwise every worker needs a distinct CPU.
 /// CPU availability is checked on the serving thread before workers start.
 pub fn resolveWorkerCpus(config: Config, cpus: *[256]u16) Error![]const u16 {
-    if (config.worker_cpus.len == 0) return cpus[0..0];
+    if (config.worker_cpus.len == 0 or std.mem.eql(u8, config.worker_cpus, "inherit")) return cpus[0..0];
     var count: usize = 0;
     var seen = std.StaticBitSet(1024).initEmpty();
     var parts = std.mem.splitScalar(
@@ -178,7 +232,7 @@ pub fn resolveWorkerCpus(config: Config, cpus: *[256]u16) Error![]const u16 {
             count += 1;
         }
     }
-    if (count != config.workers) return error.InvalidLimit;
+    if (config.workers != automatic and count != config.workers) return error.InvalidLimit;
     return cpus[0..count];
 }
 
@@ -199,6 +253,7 @@ fn parseCpu(text: []const u8) Error!usize {
 /// they do not estimate CPU capacity or reserve slots against idle clients.
 pub fn resolveAdmission(config: Config) Error!Admission.Options {
     try config.validate();
+    if (config.max_connections == automatic) return error.UnresolvedResources;
     const max_active = config.admission.max_active orelse @max(1, config.max_connections * 3 / 4);
     return .{
         .max_active = max_active,
@@ -209,9 +264,9 @@ pub fn resolveAdmission(config: Config) Error!Admission.Options {
     };
 }
 
-/// Returns a validated configuration with automatic admission counts filled in.
-/// Apply connection budgets and overrides before resolving; the result retains
-/// effective limits for worker startup and configuration inspection.
+/// Fills in admission defaults after resource sizing. Requires a numeric
+/// connection budget; otherwise returns UnresolvedResources. Server initialization
+/// performs host discovery and resolves resource budgets before calling this.
 pub fn resolve(config: Config) Error!Config {
     const options = try config.resolveAdmission();
     var resolved = config;
@@ -223,6 +278,147 @@ pub fn resolve(config: Config) Error!Config {
         .rejections_per_second = options.rejections_per_second,
     };
     return resolved;
+}
+
+/// Resolves startup limits without I/O. `requirements` describes the compiled
+/// application. Automatic CPU mapping borrows `mapping` until server deinit;
+/// explicit configuration strings retain their original ownership.
+pub fn resolveResources(
+    config: Config,
+    detected: *const Resources,
+    requirements: Requirements,
+    mapping: []u8,
+) Error!Config {
+    try config.validate();
+    var result = config;
+    const budget = config.memory_budget_bytes orelse detected.report.memory_available_bytes / 4;
+    if (budget == 0 or budget > detected.report.memory_available_bytes or
+        requirements.admin_bytes >= budget) return error.MemoryBudgetExceeded;
+    const threads = std.math.add(usize, 1, requirements.lane_threads) catch return error.InvalidLimit;
+    var resolution: Resolution = .{
+        .detected = detected.report,
+        .memory_budget_bytes = budget,
+        .estimated_bytes = 0,
+        .threads_per_worker = threads,
+        .workers = if (config.workers == automatic) .cpu else .explicit,
+        .connections = .explicit,
+        .large_buffers_automatic = config.large_buffer_bytes == automatic,
+        .http2_memory_automatic = config.http2.memory_bytes == automatic,
+        .http2_streams_automatic = config.http2.max_streams_per_worker == automatic,
+    };
+    var cpu_storage: [256]u16 = undefined;
+    const explicit_cpus = try config.resolveWorkerCpus(&cpu_storage);
+    if (config.workers == automatic) {
+        var cpu_count = detected.report.physical_cores;
+        if (detected.report.cpu_quota_millis) |quota| cpu_count = @min(cpu_count, @max(1, quota / 1000));
+        if (detected.placement_count != 0 and config.worker_cpus.len == 0)
+            cpu_count = @min(cpu_count, detected.placement_count);
+        result.workers = @min(256, @max(1, cpu_count / threads));
+        if (explicit_cpus.len != 0) {
+            result.workers = explicit_cpus.len;
+            resolution.workers = .mapping;
+        }
+    }
+    const adjustable_workers = config.workers == automatic and explicit_cpus.len == 0;
+    const minimum_connections = if (config.max_connections == automatic)
+        @max(1, config.admission.max_active orelse 1, config.admission.max_rejecting orelse 0)
+    else
+        config.max_connections;
+    const descriptor_capacity = detected.report.nofile_limit -| detected.report.reserved_fds -|
+        config.admin_connections -| @as(u64, @intFromBool(config.admin_connections != 0));
+    if (config.max_connections == automatic) {
+        const count = descriptor_capacity / (requirements.worker_fds + minimum_connections);
+        if (count == 0) return error.DescriptorBudgetTooSmall;
+        if (adjustable_workers and result.workers > count) {
+            result.workers = @intCast(count);
+            resolution.workers = .descriptors;
+        }
+    }
+    if (detected.report.available_threads) |available| {
+        const count = (available +| 1) / threads;
+        if (result.workers > count) {
+            if (!adjustable_workers or count == 0) return error.ThreadBudgetExceeded;
+            result.workers = @intCast(count);
+            resolution.workers = .threads;
+        }
+    }
+    const minimum_large = if (config.large_buffer_bytes == automatic) 1024 * 1024 else config.large_buffer_bytes;
+    const minimum_http2 = if (config.http2.memory_bytes == automatic) 1024 * 1024 else config.http2.memory_bytes;
+    const minimum_streams = if (config.http2.max_streams_per_worker == automatic)
+        1
+    else
+        config.http2.max_streams_per_worker;
+    const fixed_bytes = requirements.worker_bytes +|
+        requirements.connection_bytes *| minimum_connections +|
+        requirements.stream_queue_bytes *| minimum_streams;
+    const minimum_worker = fixed_bytes +| minimum_large +| if (config.tls != null) minimum_http2 else 0;
+    const memory_workers = (budget - requirements.admin_bytes) / @max(1, minimum_worker);
+    if (result.workers > memory_workers) {
+        if (!adjustable_workers or memory_workers == 0) return error.MemoryBudgetExceeded;
+        result.workers = @intCast(memory_workers);
+        resolution.workers = .memory;
+    }
+    const worker_budget = (budget - requirements.admin_bytes) / result.workers;
+    const flexible_bytes = worker_budget - minimum_worker;
+    if (config.large_buffer_bytes == automatic)
+        result.large_buffer_bytes = @intCast(@min(64 * 1024 * 1024, minimum_large + flexible_bytes / 4));
+    if (config.http2.memory_bytes == automatic)
+        result.http2.memory_bytes = if (config.tls != null)
+            @intCast(@min(64 * 1024 * 1024, minimum_http2 + flexible_bytes / 4))
+        else
+            1024 * 1024;
+    if (config.http2.max_streams_per_worker == automatic) {
+        // Leave half of the HTTP/2 allowance for protocol and transport storage.
+        result.http2.max_streams_per_worker = if (config.tls != null)
+            @intCast(@min(256, @max(1, result.http2.memory_bytes / 2 / @max(1, requirements.stream_bytes))))
+        else
+            1;
+        if (requirements.stream_queue_bytes != 0) {
+            const queue_budget = worker_budget -| requirements.worker_bytes -|
+                result.large_buffer_bytes -|
+                (if (config.tls != null) @as(u64, result.http2.memory_bytes) else 0) -|
+                requirements.connection_bytes *| minimum_connections;
+            result.http2.max_streams_per_worker = @intCast(@min(
+                result.http2.max_streams_per_worker,
+                queue_budget / requirements.stream_queue_bytes,
+            ));
+        }
+    }
+    const worker_fixed = requirements.worker_bytes +| result.large_buffer_bytes +|
+        (if (config.tls != null) @as(u64, result.http2.memory_bytes) else 0) +|
+        requirements.stream_queue_bytes *| result.http2.max_streams_per_worker;
+    if (worker_fixed >= worker_budget) return error.MemoryBudgetExceeded;
+    if (config.max_connections == automatic) {
+        const memory_count = (worker_budget - worker_fixed) / @max(1, requirements.connection_bytes);
+        const fd_count = (descriptor_capacity / result.workers) -| requirements.worker_fds;
+        const implementation_count = 8176 - config.admin_connections;
+        result.max_connections = @intCast(@min(memory_count, fd_count, implementation_count));
+        resolution.connections = if (result.max_connections == memory_count)
+            .memory
+        else if (result.max_connections == fd_count)
+            .descriptors
+        else
+            .implementation;
+        if (result.max_connections < minimum_connections) return error.DescriptorBudgetTooSmall;
+    }
+    resolution.estimated_bytes = requirements.admin_bytes +|
+        result.workers *| (worker_fixed +| requirements.connection_bytes *| result.max_connections);
+    if (resolution.estimated_bytes > budget) return error.MemoryBudgetExceeded;
+    if (explicit_cpus.len != 0) {
+        resolution.detected.placement = .explicit;
+    } else if (config.worker_cpus.len == 0 and detected.placement_count >= result.workers) {
+        var writer: std.Io.Writer = .fixed(mapping);
+        for (detected.placement[0..result.workers], 0..) |cpu, index| {
+            if (index != 0) writer.writeByte(',') catch return error.InvalidLimit;
+            writer.print("{d}", .{cpu}) catch return error.InvalidLimit;
+        }
+        result.worker_cpus = writer.buffered();
+    } else {
+        result.worker_cpus = "";
+        if (resolution.detected.placement == .nic) resolution.detected.placement = .unavailable;
+    }
+    result.resources = resolution;
+    return result.resolve();
 }
 
 /// `args` excludes the executable name. All string fields borrow its storage.
@@ -250,7 +446,30 @@ pub fn parse(args: []const []const u8) Error!Config {
         if (i + 1 == args.len) return error.MissingArgument;
         i += 1;
         const value = args[i];
-        if (std.mem.eql(
+        if (std.mem.eql(u8, arg, "--memory-budget-bytes")) {
+            config.memory_budget_bytes = if (std.mem.eql(u8, value, "auto"))
+                null
+            else
+                std.fmt.parseInt(u64, value, 10) catch return error.InvalidOption;
+        } else if (std.mem.eql(u8, value, "auto") and
+            (std.mem.eql(u8, arg, "--workers") or
+                std.mem.eql(u8, arg, "--max-connections") or
+                std.mem.eql(u8, arg, "--large-buffer-bytes") or
+                std.mem.eql(u8, arg, "--http2-memory-bytes") or
+                std.mem.eql(u8, arg, "--http2-worker-streams")))
+        {
+            if (std.mem.eql(u8, arg, "--workers")) {
+                config.workers = automatic;
+            } else if (std.mem.eql(u8, arg, "--max-connections")) {
+                config.max_connections = automatic;
+            } else if (std.mem.eql(u8, arg, "--large-buffer-bytes")) {
+                config.large_buffer_bytes = automatic;
+            } else if (std.mem.eql(u8, arg, "--http2-memory-bytes")) {
+                config.http2.memory_bytes = automatic;
+            } else if (std.mem.eql(u8, arg, "--http2-worker-streams")) {
+                config.http2.max_streams_per_worker = automatic;
+            } else return error.InvalidOption;
+        } else if (std.mem.eql(
             u8,
             arg,
             "--address",
@@ -503,6 +722,148 @@ pub fn parse(args: []const []const u8) Error!Config {
     return config;
 }
 
+test "automatic defaults size the whole application within CPU and descriptor limits" {
+    const testing = std.testing;
+    const detected: Resources = .{ .report = .{
+        .allowed_cpus = 32,
+        .physical_cores = 16,
+        .cpu_quota_millis = 2500,
+        .memory_limit_bytes = 256 * 1024 * 1024,
+        .memory_available_bytes = 256 * 1024 * 1024,
+        .memory_source = .cgroup_max,
+        .nofile_limit = 128,
+    } };
+    var mapping: [1280]u8 = undefined;
+    const resolved = try (Config{}).resolveResources(&detected, .{
+        .worker_bytes = 4 * 1024 * 1024,
+        .connection_bytes = 64 * 1024,
+        .admin_bytes = 1024 * 1024,
+        .stream_bytes = 128 * 1024,
+        .lane_threads = 1,
+    }, &mapping);
+    try testing.expectEqual(@as(usize, 1), resolved.workers);
+    try testing.expectEqual(@as(usize, 84), resolved.max_connections);
+    try testing.expectEqual(@as(?usize, 63), resolved.admission.max_active);
+    try testing.expectEqual(@as(?usize, 10), resolved.admission.max_rejecting);
+    try testing.expectEqual(@as(?u32, 63), resolved.admission.burst);
+    try testing.expectEqual(.descriptors, resolved.resources.?.connections);
+    try testing.expectEqual(@as(u64, 64 * 1024 * 1024), resolved.resources.?.memory_budget_bytes);
+    try testing.expect(resolved.resources.?.estimated_bytes <= resolved.resources.?.memory_budget_bytes);
+}
+
+test "automatic workers shrink to memory and thread allowances while overrides remain exact" {
+    const testing = std.testing;
+    var detected: Resources = .{ .report = .{
+        .allowed_cpus = 32,
+        .physical_cores = 16,
+        .memory_limit_bytes = 256 * 1024 * 1024,
+        .memory_available_bytes = 256 * 1024 * 1024,
+        .nofile_limit = 65536,
+    } };
+    const requirements: Requirements = .{
+        .worker_bytes = 8 * 1024 * 1024,
+        .connection_bytes = 64 * 1024,
+        .admin_bytes = 1024 * 1024,
+        .stream_bytes = 128 * 1024,
+    };
+    var mapping: [1280]u8 = undefined;
+    const automatic_config = try (Config{}).resolveResources(&detected, requirements, &mapping);
+    try testing.expectEqual(@as(usize, 6), automatic_config.workers);
+    try testing.expectEqual(.memory, automatic_config.resources.?.workers);
+    detected.report.available_threads = 1;
+    const limited = try (Config{}).resolveResources(&detected, requirements, &mapping);
+    try testing.expectEqual(@as(usize, 2), limited.workers);
+    try testing.expectEqual(.threads, limited.resources.?.workers);
+    const explicit = try (Config{
+        .workers = 1,
+        .max_connections = 7,
+        .large_buffer_bytes = 123456,
+        .http2 = .{ .memory_bytes = 2 * 1024 * 1024, .max_streams_per_worker = 17 },
+        .admission = .{ .max_active = 3, .burst = 9 },
+    }).resolveResources(&detected, requirements, &mapping);
+    try testing.expectEqual(@as(usize, 7), explicit.max_connections);
+    try testing.expectEqual(@as(usize, 123456), explicit.large_buffer_bytes);
+    try testing.expectEqual(@as(usize, 17), explicit.http2.max_streams_per_worker);
+    try testing.expectEqual(@as(usize, 2 * 1024 * 1024), explicit.http2.memory_bytes);
+    try testing.expectEqual(@as(?usize, 3), explicit.admission.max_active);
+    try testing.expectEqual(@as(?u32, 9), explicit.admission.burst);
+    try testing.expectError(
+        error.ThreadBudgetExceeded,
+        (Config{ .workers = 3 }).resolveResources(&detected, requirements, &mapping),
+    );
+    try testing.expectError(
+        error.MemoryBudgetExceeded,
+        (Config{ .memory_budget_bytes = 512 * 1024 * 1024 }).resolveResources(
+            &detected,
+            requirements,
+            &mapping,
+        ),
+    );
+}
+
+test "automatic TLS streams include executor queues in the process budget" {
+    const testing = std.testing;
+    const detected: Resources = .{ .report = .{
+        .physical_cores = 1,
+        .memory_available_bytes = 80 * 1024 * 1024,
+        .nofile_limit = 1024,
+    } };
+    var mapping: [1280]u8 = undefined;
+    const config: Config = .{
+        .tls = .{ .certificate = "server.pem", .private_key = "server.key" },
+        .admin_connections = 0,
+    };
+    const resolved = try config.resolveResources(&detected, .{
+        .worker_bytes = 8 * 1024 * 1024,
+        .connection_bytes = 64 * 1024,
+        .admin_bytes = 0,
+        .stream_bytes = 256,
+        .stream_queue_bytes = 1024 * 1024,
+    }, &mapping);
+    try testing.expectEqual(@as(usize, 5), resolved.http2.max_streams_per_worker);
+    try testing.expectEqual(@as(usize, 8), resolved.max_connections);
+    try testing.expect(resolved.resources.?.estimated_bytes <= 20 * 1024 * 1024);
+}
+
+test "automatic parsing preserves overrides in either order and accepts wide memory budgets" {
+    const testing = std.testing;
+    const defaults = try parse(&.{});
+    try testing.expectEqual(automatic, defaults.workers);
+    try testing.expectEqual(automatic, defaults.max_connections);
+    try testing.expectEqual(automatic, defaults.http2.memory_bytes);
+    const resolved = try parse(&.{
+        "--workers",         "2",  "--workers",             "auto",
+        "--max-connections", "17", "--memory-budget-bytes", "8589934592",
+    });
+    try testing.expectEqual(automatic, resolved.workers);
+    try testing.expectEqual(@as(usize, 17), resolved.max_connections);
+    try testing.expectEqual(@as(?u64, 8589934592), resolved.memory_budget_bytes);
+    try testing.expectError(error.InvalidOption, parse(&.{ "--rate", "auto" }));
+    try testing.expectError(error.InvalidLimit, parse(&.{ "--memory-budget-bytes", "0" }));
+}
+
+test "automatic worker count follows explicit CPU mapping and owns no borrowed mapping" {
+    const testing = std.testing;
+    const detected: Resources = .{ .report = .{
+        .allowed_cpus = 8,
+        .physical_cores = 4,
+        .memory_available_bytes = 1024 * 1024 * 1024,
+        .nofile_limit = 1024,
+    } };
+    var mapping: [1280]u8 = undefined;
+    const config = try parse(&.{ "--worker-cpus", "3,1" });
+    const resolved = try config.resolveResources(&detected, .{
+        .worker_bytes = 1024 * 1024,
+        .connection_bytes = 64 * 1024,
+        .admin_bytes = 0,
+        .stream_bytes = 128 * 1024,
+    }, &mapping);
+    try testing.expectEqual(@as(usize, 2), resolved.workers);
+    try testing.expectEqualStrings("3,1", resolved.worker_cpus);
+    try testing.expectEqual(.mapping, resolved.resources.?.workers);
+    try testing.expectEqual(.explicit, resolved.resources.?.detected.placement);
+}
+
 test "resource budgets reject overflow and ring capacity violations" {
     const testing = std.testing;
     try testing.expectError(
@@ -531,7 +892,7 @@ test "TCP retry parsing preserves the selected policy through resolution" {
         .thin_linear,
         (try parse(&.{ "--tcp-retries", "thin-linear" })).tcp_retries,
     );
-    const config = try parse(&.{ "--tcp-retries", "system" });
+    const config = try parse(&.{ "--tcp-retries", "system", "--max-connections", "256" });
     try testing.expectEqual(.system, (try config.resolve()).tcp_retries);
     try testing.expectError(error.InvalidOption, parse(&.{ "--tcp-retries", "unknown" }));
     try testing.expectError(error.MissingArgument, parse(&.{"--tcp-retries"}));
@@ -581,7 +942,7 @@ test "worker CPU mapping preserves order and validates ranges and cardinality" {
         try config.resolveWorkerCpus(&storage),
     );
     try testing.expectEqual(@as(usize, 0), (try (Config{}).resolveWorkerCpus(&storage)).len);
-    try testing.expectError(error.InvalidLimit, parse(&.{ "--worker-cpus", "2-3" }));
+    try testing.expectError(error.InvalidLimit, parse(&.{ "--worker-cpus", "2-3", "--workers", "1" }));
     for ([_][]const u8{
         "",
         "2,",

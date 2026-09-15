@@ -3,6 +3,7 @@
 import contextlib
 import concurrent.futures
 import json
+import os
 import queue
 import resource
 import socket
@@ -17,14 +18,24 @@ BINARY = sys.argv.pop(1) if len(sys.argv) > 1 else "zig-out/bin/zhtps"
 
 
 class Running:
-    def __init__(self, *options, nofile=None, close_logs=False):
+    def __init__(self, *options, nofile=None, close_logs=False, automatic=False, affinity=None):
         def limits():
-            resource.setrlimit(resource.RLIMIT_NOFILE, (nofile, nofile))
+            if nofile is not None:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (nofile, nofile))
+            if affinity is not None:
+                os.sched_setaffinity(0, affinity)
+        # Existing wire specifications rely on fixed per-worker capacities.
+        # Automatic sizing has separate tests that launch without these overrides.
+        defaults = [] if automatic else [
+            "--workers", "1", "--max-connections", "256",
+            "--large-buffer-bytes", "67108864", "--http2-worker-streams", "256",
+            "--http2-memory-bytes", "67108864",
+        ]
         self.process = subprocess.Popen(
-            [BINARY, "--port", "0", "--admin-port", "0", *options],
+            [BINARY, "--port", "0", "--admin-port", "0", *defaults, *options],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            preexec_fn=limits if nofile is not None else None,
+            preexec_fn=limits if nofile is not None or affinity is not None else None,
         )
         self.events = []
         self.close_logs = close_logs

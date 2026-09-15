@@ -379,6 +379,38 @@ test "dependency worker placement leaves endpoint executors on the inherited mas
     try testing.expectEqual(@as(?zhtps.RunError, null), host.failure);
 }
 
+test "dependency automatically sizes generated executors within inherited affinity" {
+    const testing = std.testing;
+    const original = try zhtps.platform.getAffinity();
+    var cpu: usize = 0;
+    while (!zhtps.platform.cpuAllowed(&original, cpu)) : (cpu += 1) {}
+    _ = try zhtps.platform.pinCpu(cpu);
+    defer zhtps.platform.setAffinity(&original) catch unreachable;
+    var services: endpoint_api.Services = .{ .greeting = "hello" };
+    var server: EndpointApp.Server = undefined;
+    try server.init(testing.allocator, testing.io, .{
+        .port = 0,
+        .admin_port = 0,
+        .log_fd = null,
+    }, .{ .services = &services });
+    defer server.deinit();
+    var serving: EndpointServing = .{ .server = &server };
+    const thread = try std.Thread.spawn(.{}, EndpointServing.run, .{&serving});
+    defer {
+        server.requestStop();
+        thread.join();
+    }
+    const response = try request(testing.allocator, server.adminPort().?, "GET /debug/config HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
+    defer testing.allocator.free(response);
+    try testing.expect(std.mem.startsWith(u8, response, "HTTP/1.1 200 OK\r\n"));
+    const boundary = std.mem.indexOf(u8, response, "\r\n\r\n").? + 4;
+    const config = try std.json.parseFromSlice(zhtps.Config, testing.allocator, response[boundary..], .{});
+    defer config.deinit();
+    try testing.expectEqual(@as(usize, 1), config.value.workers);
+    try testing.expectEqual(@as(usize, 4), config.value.resources.?.threads_per_worker);
+    try testing.expectEqual(@as(usize, 1), config.value.resources.?.detected.allowed_cpus);
+}
+
 test "dependency serves generated endpoints with middleware services and metrics" {
     const testing = std.testing;
     var temporary = testing.tmpDir(.{});
@@ -397,6 +429,8 @@ test "dependency serves generated endpoints with middleware services and metrics
         .{
             .port = 0,
             .admin_port = 0,
+            // This queue-expiry scenario requires one thread in each declared lane.
+            .workers = 1,
             .max_connections = 4,
             .admin_connections = 1,
             .log_fd = log_file.handle,

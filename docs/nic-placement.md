@@ -6,7 +6,11 @@
 
 ZHTPS now accepts an explicit worker-to-CPU mapping. This implements the
 operational finding in [the kernel experiments](kernel-work.md) without putting
-topology discovery in the request path.
+topology discovery in the request path. Startup now applies this policy automatically
+for a non-loopback listener when exactly one physical NIC has usable topology.
+Ambiguous or unsupported topology retains scheduler placement; `--worker-cpus inherit`
+also retains it explicitly. CPU count and resource sizing follow the service's
+[host and cgroup allocation](configuration.md#automatic-defaults).
 
 ```sh
 python3 deploy/worker_cpus.py --interface server_eth0 --workers 1 --json
@@ -20,9 +24,10 @@ implementation, not a new physical-NIC throughput measurement.
 
 `--worker-cpus 9,10-12 --workers 4` assigns workers 0–3 in that order. The library
 uses `Config.worker_cpus` with the same borrowed string. Empty configuration
-inherits scheduler placement. Explicit mappings require one distinct logical
+permits automatic NIC placement. Explicit mappings require one distinct logical
 CPU per worker, with IDs 0–1023; malformed, overlapping, and wrong-length lists
-are rejected. Availability is checked against the **serving thread's** inherited
+are rejected. When worker count is automatic, the explicit list determines it.
+Availability is checked against the **serving thread's** inherited
 affinity before spawning workers, so an explicit mapping cannot widen an
 existing taskset or cpuset allocation. Each worker rechecks and pins itself
 before passing the startup barrier. Readiness records follow that barrier.
@@ -50,8 +55,7 @@ heuristic; the original measured benefit covers one worker and a one-queue NIC.
 Placement stores one borrowed string in configuration and one optional CPU ID
 per worker. It adds no connection fields, request allocations, or affinity
 system calls to the request path. The fixed affinity mask supports up to 1024
-CPU IDs; explicit affinity reports `AffinityMaskTooSmall` when the kernel needs
-a larger mask. Unconfigured placement does not query that mask.
+CPU IDs; startup reports `AffinityMaskTooSmall` when the kernel needs a larger mask.
 
 The tests cover ordered live worker pinning and HTTP service, inherited default
 masks, rejection outside the inherited mask without readiness, caller-mask

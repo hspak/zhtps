@@ -37,6 +37,11 @@ const api = struct {
         },
     };
     pub const routes = .{
+        zhtps.staticFiles(
+            @This(),
+            "/static",
+            .{ .root = "." },
+        ),
         zhtps.get("/events", events),
         zhtps.get("/stream-cancel", events),
         zhtps.get("/generated", generated),

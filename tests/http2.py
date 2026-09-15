@@ -163,6 +163,23 @@ class Http2Tests(unittest.TestCase):
                 self.success(client.wait(stream), b"one\ntwo\nthree\n" if i % 2 else b"ZHTPS\n")
             self.success(client.wait(client.request()), b"ZHTPS\n")
 
+    def test_static_files_get_head_and_conditional_response(self):
+        expected = Path("docs/testing.md").read_bytes()
+        with self.server(fixture=True) as server, Client(server.port, self.context) as client:
+            response = client.wait(client.request("/static/docs/testing.md"))
+            self.success(response, expected)
+            head = client.wait(client.request("/static/docs/testing.md", method="HEAD"))
+            self.success(head, b"")
+            self.assertEqual(head["headers"]["content-length"], str(len(expected)))
+            conditional = client.wait(client.request("/static/docs/testing.md", headers=[
+                ("if-none-match", response["headers"]["etag"]),
+            ]))
+            self.assertEqual(conditional["headers"][":status"], "304")
+            self.assertEqual(conditional["body"], b"")
+            self.assertTrue(conditional["ended"])
+            self.assertIsNone(conditional["reset"])
+            self.success(client.wait(client.request("/origin")))
+
     def test_response_field_encoding_preserves_duplicates_and_rejects_invalid_metadata(self):
         with self.server(fixture=True) as server, Client(server.port, self.context) as client:
             stream = client.request("/response-fields")

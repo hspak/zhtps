@@ -60,6 +60,14 @@ output. `--no-access-log` skips per-response records while retaining metrics,
 startup, sampled rejection, shutdown, and explicitly requested debug events.
 Logs never contain request bodies or arbitrary headers.
 
+Startup emits `resources_resolved` at info level with every resolved resource
+budget, including derived admission counts and burst, plus the sizing sources.
+`worker_resources_resolved` records each worker's selected CPU and actual io_uring
+submission/completion queue sizes. Per-worker budgets use `_per_worker` field
+names; `memory_budget_bytes` and `estimated_bytes` describe the process. CPU null
+means scheduler placement. These events remain enabled with `--no-access-log` and
+do not require `--verbose`. See [automatic defaults](configuration.md#automatic-defaults).
+
 Each worker has a fixed queue (`--log-slots`, default 256). An atomic owner
 allows one asynchronous log write in flight across that server's workers and retains
 ownership across partial writes, preserving whole JSON records without blocking

@@ -23,6 +23,7 @@ pub const Method = endpoints.Method;
 pub const Status = endpoints.Status;
 pub const endpoint = endpoints.endpoint;
 pub const get = endpoints.get;
+pub const staticFiles = endpoints.staticFiles;
 pub const group = endpoints.group;
 pub const Server = server.Server;
 /// Server with the bundled root, echo, and stream resources; no router setup required.

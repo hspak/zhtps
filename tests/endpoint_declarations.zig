@@ -65,6 +65,38 @@ const api = struct {
         11 => .{zhtps.get("/a/../b", respond)},
         12 => .{zhtps.group(.{ .prefix = "/:tenant", .routes = .{zhtps.get("/", respond)} })},
         13 => .{ zhtps.get("/:id", respond), zhtps.get("/:name", respond) },
+        20 => .{zhtps.staticFiles(
+            @This(),
+            "/",
+            .{ .root = "public", .cache_contol = "no-cache" },
+        )},
+        21 => .{
+            zhtps.staticFiles(
+                @This(),
+                "/",
+                .{ .root = "public" },
+            ),
+            zhtps.staticFiles(
+                @This(),
+                "/",
+                .{ .root = "other" },
+            ),
+        },
+        22 => .{zhtps.staticFiles(
+            @This(),
+            "/assets/",
+            .{ .root = "public" },
+        )},
+        23 => .{zhtps.staticFiles(
+            @This(),
+            "/",
+            .{ .root = "public", .index_file = "../secret" },
+        )},
+        24 => .{zhtps.staticFiles(
+            @This(),
+            "/",
+            .{ .root = "public", .cache_control = "bad\r\n" },
+        )},
         14 => .{zhtps.group(.{ .prefix = "/", .routes = .{} })},
         16 => .{zhtps.get("/a?b", respond)},
         18 => .{zhtps.endpoint(.{

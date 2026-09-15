@@ -98,7 +98,8 @@ pub fn compileRoutes(comptime Api: type, comptime R: type) [count(Api.routes)]R 
     compilation.collect(Api.routes, .{});
     for (compilation.routes, 0..) |left, at| {
         for (compilation.routes[at + 1 ..]) |right| {
-            if (left.method == right.method and samePattern(left.path, right.path))
+            if (left.method == right.method and left.subtree == right.subtree and
+                samePattern(left.path, right.path))
                 @compileError("duplicate endpoint method and path pattern");
         }
     }
@@ -131,7 +132,9 @@ fn Compilation(comptime Api: type, comptime R: type) type {
                 if (middleware.len > 16)
                     @compileError("an endpoint has more than sixteen middleware functions");
                 if (comptime @hasField(@TypeOf(entry), "handler")) {
-                    const path = options.prefix ++ entry.path;
+                    const joined = options.prefix ++ entry.path;
+                    const path = if (entry.subtree and joined.len > 1 and
+                        joined[joined.len - 1] == '/') joined[0 .. joined.len - 1] else joined;
                     validatePath(path);
                     self.routes[self.len] = entry;
                     self.routes[self.len].path = path;

@@ -239,6 +239,91 @@ violation. `call.redirect(status, location)` copies Location into scratch and
 accepts 301, 302, 303, 307 and 308. Raw `http.Response` headers and bodies likewise
 need storage that survives response completion; framing headers remain reserved.
 
+## Static files
+
+Mount a directory with one route declaration:
+
+```zig
+const Api = struct {
+    pub const lanes = .{ .files = .{ .timeout_ms = 30_000 } };
+    pub const routes = .{
+        zhtps.staticFiles(@This(), "/", .{ .root = "public" }),
+    };
+};
+
+const App = zhtps.Application(Api);
+```
+
+Run `App.Server` as shown above. `/` serves `public/index.html` and
+`/css/site.css` serves `public/css/site.css`. Root paths are relative to the
+process working directory, or may be absolute. The directory is opened on each
+request, so replacements become visible without restarting. A missing or
+inaccessible configured root produces a logged 500; a missing or inaccessible
+file within it produces 404.
+
+`staticFiles(Api, prefix, options)` supports these options:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `root` | Required | Filesystem directory path |
+| `index_file` | `"index.html"` | Single filename to serve for directories; `null` disables indexes |
+| `cache_control` | `"no-cache"` | Cache-Control response field; permits storage with revalidation |
+| `dotfiles` | `false` | Allow names starting with `.`, including `.well-known` |
+| `name` | URL prefix | Route name used in logs and metrics |
+| `before` | Empty | Middleware, after inherited group middleware |
+| `lane` | First declared lane | Application lane for opening and streaming files |
+
+The prefix must be a normalized literal URL path, without a trailing slash
+unless it is `/`. A mount at `/assets` covers `/assets` and `/assets/...`, but
+does not cover `/assets-other`. Group prefixes and middleware compose normally.
+Explicit endpoints, including parameter routes, take precedence over directory
+mounts. Among mounts, the longest prefix wins. Method errors on an explicit
+endpoint remain 405. Mounted resources support GET, automatic HEAD and OPTIONS;
+other supported HTTP methods return 405 with Allow.
+
+Directories with an index redirect to a trailing slash using 308, preserving the
+query string so relative links resolve correctly. Directories without an index
+return 404; directory listings are never generated. Common web extensions select
+Content-Type, with `application/octet-stream` for unknown extensions. Every file
+response includes `X-Content-Type-Options: nosniff`, a weak ETag derived from file
+metadata, and Last-Modified when the timestamp is representable. Conditional
+requests can return 304 or 412. Range requests receive the full representation;
+automatic compression and SPA fallback are not provided.
+
+URL escapes decode once for filenames (including spaces and UTF-8); encoded
+separators, backslashes, control bytes, `.` and `..` segments are rejected.
+The transport first normalizes URL dot segments, and all filesystem lookups stay
+relative to the selected root. Symlinks within the root are never followed,
+including intermediate directories and index files. Dotfiles are hidden by
+default. Only regular files are served; devices, sockets and FIFOs return 404.
+
+Files stream through a 16 KiB read buffer and the existing bounded transport
+buffer, independently of file size and request scratch capacity. The opened file
+is closed automatically on completion, HEAD, conditional responses, cancellation
+and abort; no `Api.Local` or `release` hook is needed. Headers and decoded paths
+use request scratch. File I/O and backpressure occupy a lane thread. Set a lane
+deadline long enough for the entire download; the default 100 ms is usually too
+short. Deploy replacements by renaming complete files: truncating an open file
+during a response aborts that response if its advertised length cannot be read.
+
+For a directory opened at startup or selected through application services, use
+`call.serveDir` in your own handler:
+
+```zig
+fn assets(call: *zhtps.Call(@This())) zhtps.EndpointError!zhtps.http.Response {
+    return call.serveDir(call.services.public_dir, .{
+        .path = call.param("filename").?,
+        .cache_control = "public, max-age=3600",
+    });
+}
+```
+
+The caller owns `public_dir` and keeps it open through the helper call. Options
+are `path`, `index_file`, `cache_control` and `dotfiles`; `path` is URL-escaped and
+relative to the directory, defaulting to the request path without leading slashes.
+Register this handler as a GET endpoint. Response file descriptors belong to the
+exchange and remain valid after the borrowed directory is closed.
+
 ## Streaming responses
 
 Generated endpoints can return a streaming response with `call.stream(options,

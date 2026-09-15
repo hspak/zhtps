@@ -5,7 +5,7 @@
 > Artifact paths and restoration commands below describe the original runs.
 
 ZHTPS runs one thread and private io_uring per worker. `--workers` defaults to
-one. Public connection capacity, active permits, token buckets, rejection budgets,
+[automatic resource sizing](configuration.md#automatic-defaults). Public connection capacity, active permits, token buckets, rejection budgets,
 and log queues apply per worker; adding workers multiplies capacity. The shared
 admin listener and its reserved connections belong to worker zero.
 

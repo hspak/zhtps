@@ -11,13 +11,15 @@ const routing = @import("endpoint/routing.zig");
 const endpoint_server = @import("endpoint/server.zig");
 const Scratch = @import("endpoint/Scratch.zig");
 const bounded_json = @import("endpoint/json.zig");
+const static_files = @import("endpoint/static_files.zig");
 pub const ResponseStream = @import("endpoint/ResponseStream.zig");
 const log = std.log.scoped(.endpoint);
 
 /// Errors available to every endpoint. InvalidInput becomes a 400 response;
 /// allocation failures, excessive output depth and application errors become 500.
 /// Producer errors after response commitment abort that response instead.
-pub const EndpointError = JsonError || InputError || ResponseStream.Error || std.Io.Writer.Error;
+pub const EndpointError = JsonError || InputError || ResponseStream.Error || std.Io.Writer.Error ||
+    static_files.Error;
 
 /// Response serialization exceeds scratch capacity or the JSON nesting limit.
 pub const JsonError = bounded_json.WriteError;
@@ -286,6 +288,23 @@ pub fn Call(comptime Api: type) type {
         allowed_methods: []const u8,
         cancellation: ?*const std.atomic.Value(bool) = null,
         response_producer: *?Producer,
+        response_file: *?static_files.Transfer,
+        route_path: []const u8,
+
+        pub const ServeDirOptions = static_files.Options;
+
+        /// Serves a path relative to a borrowed directory, which must remain open
+        /// through this call. Defaults to the request path without its leading '/'.
+        /// Files stream from an owned descriptor released automatically on completion
+        /// or abort. Index pages are supported; symlinks are rejected and dotfiles
+        /// are hidden by default.
+        pub fn serveDir(
+            call: *Self,
+            directory: std.Io.Dir,
+            options: ServeDirOptions,
+        ) EndpointError!http.Response {
+            return static_files.serve(call, directory, options);
+        }
 
         /// True after this request is canceled, its deadline expires, or its
         /// connection closes. Hooks may cooperate by ending work promptly.
@@ -542,6 +561,29 @@ pub fn Route(comptime Api: type) type {
         max_body_bytes: usize = 0,
         consume: ?BodyConsumer = null,
         lane: Lane = std.enums.values(Lane)[0],
+        /// Directory mounts match their prefix and every descendant path.
+        subtree: bool = false,
+
+        fn matches(route: Self, path: []const u8) bool {
+            if (!route.subtree) return routing.matches(path, route.path);
+            if (!std.mem.startsWith(
+                u8,
+                path,
+                route.path,
+            )) return false;
+            return route.path.len == 1 or path.len == route.path.len or
+                path[route.path.len] == '/';
+        }
+
+        fn sameResource(route: Self, other: Self) bool {
+            return route.subtree == other.subtree and routing.samePattern(route.path, other.path);
+        }
+
+        fn moreSpecific(route: Self, other: Self) bool {
+            if (route.subtree != other.subtree) return !route.subtree;
+            if (route.subtree) return route.path.len > other.path.len;
+            return routing.moreSpecific(route.path, other.path);
+        }
     };
 }
 
@@ -608,6 +650,70 @@ pub fn get(comptime path: []const u8, comptime handler: anytype) Route(HandlerAp
         .path = path,
         .handler = handler,
     });
+}
+
+/// Mounts a filesystem directory at a literal URL prefix, including under groups.
+/// Options require root (a path relative to cwd, or absolute); optional index_file,
+/// cache_control, dotfiles, name, before and lane configure serving and execution.
+/// Explicit endpoints win over mounts; the longest matching mount wins otherwise.
+/// The root is opened on each request. File I/O runs on the selected application lane.
+pub fn staticFiles(
+    comptime Api: type,
+    comptime prefix: []const u8,
+    comptime options: anytype,
+) Route(Api) {
+    comptime routing.validatePrefix(prefix);
+    comptime routing.validateOptions(@TypeOf(options), &.{
+        "root",
+        "index_file",
+        "cache_control",
+        "dotfiles",
+        "name",
+        "before",
+        "lane",
+    });
+    const serving: static_files.Options = .{
+        .index_file = if (@hasField(@TypeOf(options), "index_file"))
+            options.index_file
+        else
+            "index.html",
+        .cache_control = if (@hasField(@TypeOf(options), "cache_control"))
+            options.cache_control
+        else
+            "no-cache",
+        .dotfiles = if (@hasField(@TypeOf(options), "dotfiles")) options.dotfiles else false,
+    };
+    comptime static_files.validateOptions(serving);
+    const Handler = struct {
+        fn respond(call: *Call(Api)) Call(Api).HandlerError!http.Response {
+            const directory = try std.Io.Dir.cwd().openDir(
+                call.io,
+                options.root,
+                .{},
+            );
+            defer directory.close(call.io);
+            const rest = call.request.path[call.route_path.len..];
+            var request_options = serving;
+            request_options.path = if (std.mem.startsWith(
+                u8,
+                rest,
+                "/",
+            )) rest[1..] else rest;
+            return call.serveDir(directory, request_options);
+        }
+    };
+    return .{
+        .name = if (@hasField(@TypeOf(options), "name")) options.name else prefix,
+        .method = .get,
+        .path = prefix,
+        .handler = Handler.respond,
+        .subtree = true,
+        .before = if (@hasField(@TypeOf(options), "before")) options.before else &.{},
+        .lane = if (@hasField(@TypeOf(options), "lane"))
+            options.lane
+        else
+            std.enums.values(Route(Api).Lane)[0],
+    };
 }
 
 /// Preserves heterogeneous route and middleware tuples until Application flattens them.
@@ -759,6 +865,7 @@ fn RoutedExchange(comptime Api: type) type {
         unexpected_error: ?C.HandlerError = null,
         cancellation: ?*const std.atomic.Value(bool) = null,
         response_producer: ?C.Producer = null,
+        response_file: ?static_files.Transfer = null,
         response_stream: ResponseStream = .{},
 
         pub const BodyError = error{BodyTooLarge};
@@ -905,6 +1012,10 @@ fn RoutedExchange(comptime Api: type) type {
             if (comptime @hasDecl(Api, "release")) {
                 var request_call = exchange.makeCall(request, exchange.bodyScratch());
                 Api.release(&request_call);
+            }
+            if (exchange.response_file) |transfer| {
+                transfer.file.close(exchange.io);
+                exchange.response_file = null;
             }
             exchange.head_allocator.init(&exchange.head_scratch);
             exchange.scratch = null;
@@ -1064,6 +1175,8 @@ fn RoutedExchange(comptime Api: type) type {
                 .allowed_methods = exchange.allowedMethods(),
                 .cancellation = exchange.cancellation,
                 .response_producer = &exchange.response_producer,
+                .response_file = &exchange.response_file,
+                .route_path = if (exchange.selected) |route| route.path else "",
             };
         }
 
@@ -1071,14 +1184,14 @@ fn RoutedExchange(comptime Api: type) type {
             const routes = &Application(Api).routes;
             var resource: ?R = null;
             for (routes) |route| {
-                if (!routing.matches(request.path, route.path)) continue;
-                if (resource == null or routing.moreSpecific(route.path, resource.?.path))
+                if (!route.matches(request.path)) continue;
+                if (resource == null or route.moreSpecific(resource.?))
                     resource = route;
             }
             const matched = resource orelse return;
             var fallback: ?R = null;
             for (routes) |route| {
-                if (!routing.samePattern(route.path, matched.path)) continue;
+                if (!route.sameResource(matched)) continue;
                 exchange.addAllowed(route.method);
                 if (std.mem.eql(
                     u8,
@@ -1105,7 +1218,7 @@ fn RoutedExchange(comptime Api: type) type {
                     405;
             }
             const selected = exchange.selected.?;
-            const matched_path = exchange.matchPath(request.path, selected.path);
+            const matched_path = selected.subtree or exchange.matchPath(request.path, selected.path);
             std.debug.assert(matched_path);
             for (selected.before) |middleware| exchange.appendMiddleware(middleware);
         }
@@ -1321,6 +1434,8 @@ fn HandlerErrors(comptime Api: type) type {
     const info = @typeInfo(ErrorSet);
     if (info != .error_set) @compileError("Api.HandlerError must be an error set");
     if (info.error_set == null) @compileError("Api.HandlerError must be a closed error set");
+    // Filesystem errors enlarge the pairwise check for custom handler error sets.
+    @setEvalBranchQuota(1000 + @typeInfo(EndpointError).error_set.?.len * info.error_set.?.len * 20);
     for (@typeInfo(EndpointError).error_set.?) |required| {
         const found = found: {
             for (info.error_set.?) |item| {
@@ -1840,4 +1955,94 @@ test "scratch exhaustion preserves cleanup inputs and reclaims the next request 
     }
     try std.testing.expect(services.intact);
     try std.testing.expectEqual(@as(usize, 2), services.releases);
+}
+
+test "static files close retained descriptors after HEAD and canceled production" {
+    const testing = std.testing;
+    const api = struct {
+        pub const Services = struct { directory: std.Io.Dir };
+        fn respond(call: *Call(@This())) EndpointError!http.Response {
+            return call.serveDir(call.services.directory, .{ .path = "file.txt" });
+        }
+        pub const routes = .{get("/", respond)};
+    };
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "file.txt", .data = "retained" });
+    var services: api.Services = .{ .directory = tmp.dir };
+    var storage: [2048]u8 = undefined;
+    var metrics: Application(api).CustomMetrics = .{};
+    var exchange: Application(api).Exchange = undefined;
+    exchange.initApplication(&storage, &services);
+    exchange.setRequestRuntime(
+        &metrics,
+        testing.io,
+        1,
+        1,
+    );
+    for ([_][]const u8{ "HEAD", "GET" }) |method| {
+        var canceled: std.atomic.Value(bool) = .init(false);
+        exchange.setCancellation(&canceled);
+        const request: http.Request = .{ .method = method, .path = "/" };
+        try testing.expect(exchange.receiveHead(&request) == null);
+        defer exchange.releaseApplication(&request);
+        const response = exchange.respond(&request);
+        try testing.expectEqual(@as(u16, 200), response.status);
+        try testing.expectEqual(@as(?u64, 8), response.body.stream);
+        const fd = exchange.response_file.?.file.handle;
+        if (std.mem.eql(
+            u8,
+            method,
+            "GET",
+        )) {
+            canceled.store(true, .release);
+            var call = exchange.makeCall(&request, exchange.bodyScratch());
+            var output: ResponseStream = .{};
+            try testing.expectError(error.Canceled, exchange.response_producer.?(&call, &output));
+        }
+        exchange.releaseApplication(&request);
+        try testing.expect(exchange.response_file == null);
+        try testing.expectEqual(platform.linux.E.BADF, platform.linux.errno(
+            platform.linux.fcntl(
+                fd,
+                platform.linux.F.GETFD,
+                0,
+            ),
+        ));
+    }
+}
+
+test "static files detect truncation between response headers and production" {
+    const testing = std.testing;
+    const api = struct {
+        pub const Services = struct { directory: std.Io.Dir };
+        fn respond(call: *Call(@This())) EndpointError!http.Response {
+            return call.serveDir(call.services.directory, .{ .path = "file.txt" });
+        }
+        pub const routes = .{get("/", respond)};
+    };
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "file.txt", .data = "original" });
+    var services: api.Services = .{ .directory = tmp.dir };
+    var storage: [2048]u8 = undefined;
+    var metrics: Application(api).CustomMetrics = .{};
+    var exchange: Application(api).Exchange = undefined;
+    exchange.initApplication(&storage, &services);
+    exchange.setRequestRuntime(
+        &metrics,
+        testing.io,
+        1,
+        1,
+    );
+    const request: http.Request = .{ .method = "GET", .path = "/" };
+    try testing.expect(exchange.receiveHead(&request) == null);
+    defer exchange.releaseApplication(&request);
+    const response = exchange.respond(&request);
+    try testing.expectEqual(@as(u16, 200), response.status);
+    try testing.expectEqual(@as(?u64, 8), response.body.stream);
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "file.txt", .data = "" });
+    var call = exchange.makeCall(&request, exchange.bodyScratch());
+    var output: ResponseStream = .{};
+    try testing.expectError(error.FileChanged, exchange.response_producer.?(&call, &output));
 }

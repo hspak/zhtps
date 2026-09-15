@@ -10,6 +10,7 @@ Run these commands from the repository root.
 zig build test
 zig build test-library
 zig build test-wire
+zig build test-resources
 zig build test-deploy
 zig build test-tls
 zig build test-application test-upload test-response-streaming
@@ -22,6 +23,13 @@ The load/sweep and HTTP/1 wire tools require Python 3.11 or later and use only i
 standard library. TLS tests also invoke OpenSSL; the HTTP/2 suite requires the
 packages in `tests/requirements-http2.txt`. See [HTTP/2 verification](http2.md#verification)
 for environment setup and the `zig build test-http2` command.
+
+Automatic sizing tests launch the real server with restricted CPU affinity and
+descriptor limits, check the effective config, and serve HTTP requests. In-file
+resource-discovery fixtures exercise cgroup v1/v2, inherited limits, namespace and
+subtree mounts, malformed inputs, and NIC topology without changing host settings.
+Existing wire and queue-expiry fixtures explicitly retain their original worker
+and capacity settings so their saturation and scheduling coverage stays stable.
 Wire and library integration tests start ephemeral local servers and exercise
 real io_uring operations; they require an environment that permits those calls.
 The fuzz target compares complete versus fragmented parsing, message boundaries,

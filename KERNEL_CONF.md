@@ -6,17 +6,23 @@ cannot determine optimal TCP buffers, NIC queues, or congestion control.
 The recommendations below are starting points to validate against successful
 requests per second and tail latency under the intended workload.
 
+ZHTPS now detects host and cgroup resources at startup and automatically sizes
+workers and memory/connection budgets. Use the resolved numbers in `/debug/config`
+for the calculations below. Automatic connection sizing respects the inherited
+soft descriptor limit; explicit connection counts still require provisioning that
+limit. See [automatic defaults](docs/configuration.md#automatic-defaults).
+
 ## Configuration inputs
 
 | Symbol | ZHTPS setting | Meaning |
 |---|---|---|
-| `W` | `--workers` | Event-loop threads; default 1 |
-| `C` | `--max-connections` | Public connection slots per worker; default 256 |
+| `W` | `--workers` | Event-loop threads; automatic by default |
+| `C` | `--max-connections` | Public connection slots per worker; automatic by default |
 | `A` | `--admin-connections` | Admin slots on worker zero only; default 8 |
-| `P` | `--max-active` | Active public request permits per worker; default 256 |
+| `P` | `--max-active` | Active public request permits per worker; default max(1, 3 * C / 4) |
 | `N` | `W * C + A` | Total application connection slots |
 
-The current implementation requires `1 <= W <= 256`, `1 <= A <= 128`, and
+The current implementation requires `1 <= W <= 256`, `0 <= A <= 128`, and
 `C + A <= 8176`. With default admin capacity, `C <= 8168`, regardless of `W`.
 These are application limits; sysctls cannot raise them. See
 [Config.zig](src/Config.zig) and [worker ownership](docs/workers.md).

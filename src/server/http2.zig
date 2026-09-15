@@ -1096,7 +1096,13 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
 }
 
 const TestOwner = struct {
-    config: Config = .{},
+    // Allocation-failure specifications use fixed limits without server startup.
+    config: Config = .{
+        .workers = 1,
+        .max_connections = 256,
+        .large_buffer_bytes = 64 * 1024 * 1024,
+        .http2 = .{ .max_streams_per_worker = 256, .memory_bytes = 64 * 1024 * 1024 },
+    },
     metrics: Metrics = .{},
     admission: Admission = undefined,
     next_request: u64 = 1,

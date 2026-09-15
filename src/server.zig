@@ -24,6 +24,7 @@ pub fn Server(comptime App: type) type {
         gpa: std.mem.Allocator,
         shared: *Worker.Shared,
         threads: []std.Thread,
+        automatic_mapping: []u8,
         phase: enum {
             ready,
             serving,
@@ -81,7 +82,16 @@ pub fn Server(comptime App: type) type {
             application: Worker.RuntimeInit,
         ) InitError!void {
             self.* = undefined;
-            var resolved = try config.resolve();
+            try config.validate();
+            var detected = try Config.Resources.detect(gpa, io);
+            if (config.worker_cpus.len == 0) try detected.detectPlacement(io, config.address);
+            const automatic_mapping = try gpa.alloc(u8, 1280);
+            errdefer gpa.free(automatic_mapping);
+            var resolved = try config.resolveResources(
+                &detected,
+                Worker.resourceRequirements(config),
+                automatic_mapping,
+            );
             const shared = try gpa.create(Worker.Shared);
             errdefer gpa.destroy(shared);
             const workers = try gpa.alloc(Worker, resolved.workers);
@@ -120,6 +130,7 @@ pub fn Server(comptime App: type) type {
                 .gpa = gpa,
                 .shared = shared,
                 .threads = threads,
+                .automatic_mapping = automatic_mapping,
             };
         }
 
@@ -202,6 +213,7 @@ pub fn Server(comptime App: type) type {
             self.gpa.free(self.threads);
             self.gpa.free(self.shared.workers);
             self.gpa.destroy(self.shared);
+            self.gpa.free(self.automatic_mapping);
             self.* = undefined;
         }
 

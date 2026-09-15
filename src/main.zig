@@ -27,17 +27,18 @@ pub fn main(init: std.process.Init) !void {
                 "  --tls-key PATH               unencrypted PEM private key\n" ++
                 "  --tls-handshake-timeout-ms N  default 5000\n" ++
                 "  --http2-max-streams N         per connection; default 100\n" ++
-                "  --http2-worker-streams N      active/retained streams per worker; default 256\n" ++
-                "  --http2-memory-bytes N        protocol/stream bytes per worker; default 67108864\n" ++
+                "  --http2-worker-streams N      active/retained streams per worker; default auto\n" ++
+                "  --http2-memory-bytes N        protocol/stream bytes per worker; default auto\n" ++
                 "  --admin-address IP           default 127.0.0.1\n" ++
                 "  --admin-port PORT            default 9090; 0 chooses a free port\n" ++
-                "  --workers N                  event-loop threads/rings; default 1\n" ++
-                "  --worker-cpus LIST           ordered CPU IDs/ranges, one per worker\n" ++
-                "  --max-connections N          per worker; default 256\n" ++
+                "  --workers N                  event-loop threads/rings; default auto\n" ++
+                "  --worker-cpus LIST           ordered CPU IDs/ranges; inherit disables NIC placement\n" ++
+                "  --max-connections N          per worker; default auto\n" ++
+                "  --memory-budget-bytes N      process sizing budget; default 1/4 of available memory\n" ++
                 "  --admin-connections N        reserved admin slots; 0 disables; default 8\n" ++
                 "  --completion-budget N        completions per loop; default 64\n" ++
                 "  --response-batches N         aggregate buffers/worker; 0 disables; default 64\n" ++
-                "  --large-buffer-bytes N       leased large buffers/worker; default 67108864\n" ++
+                "  --large-buffer-bytes N       leased large buffers/worker; default auto\n" ++
                 "  --log-slots N                buffered JSON records; default 256\n" ++
                 "  --max-active N               per worker; default 3/4 of public slots, min 1\n" ++
                 "  --max-rejecting N            per worker; default 1/8 of public slots, min 1\n" ++

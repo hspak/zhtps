@@ -5,9 +5,77 @@ Set runtime options with the standalone CLI (`zhtps --help`) or an embedded
 compile-time API. Start with `-Doptimize=ReleaseSafe`; use a representative workload
 to choose budgets, then test saturation and recovery using the [load tools](testing.md).
 
+## Automatic defaults
+
+The CLI and `Config{}` automatically size workers, public connections, leased
+large buffers, HTTP/2 memory, and HTTP/2 worker stream capacity before binding.
+An explicit number overrides that field; `auto` on those five CLI options, or
+`Config.automatic` in a library field, restores automatic sizing. Other protocol,
+admission-rate, timeout, logging, and application-lane policies retain their defaults.
+
+Startup reads the calling thread's affinity, physical-core topology, memory,
+descriptor limit, and cgroup membership/mounts. **Service limits take precedence
+over host capacity.** Both cgroup v1 and v2 are supported, including visible
+parents, subtree mounts, and cgroup namespaces. CPU quotas and cpusets constrain
+CPU sizing; `memory.max`, `memory.high`, or v1 memory limits constrain memory;
+`pids.max` constrains additional threads. An unlimited child cannot override a
+tighter parent. Limits above a namespace's visible mount root cannot be inspected.
+Malformed or unreadable service-limit information fails startup instead of
+silently using host totals. Missing CPU topology falls back to one physical core.
+
+The default process sizing budget is one quarter of the smaller of host available
+memory and remaining cgroup memory allowance. `--memory-budget-bytes N` overrides
+this allowance, up to detected available memory. The estimate accounts for compiled
+connection/request records, bounded caches, admin storage, log/batch queues, lane
+queues, and allowances for stacks, sockets, and TLS. It is a sizing estimate rather
+than an RSS limit: application allocations, actual kernel/TLS costs, and other
+processes can consume additional memory. Discovery is a startup snapshot; limits
+and occupancy can change afterward.
+
+Automatic worker count starts from physical cores within the affinity mask and
+CPU quota, divided by one transport thread plus the declared lane threads per
+worker. Fractional quotas round down with a minimum of one worker. Memory, thread,
+and descriptor constraints can reduce the result. Explicit worker counts remain
+exact, including intentional CPU oversubscription; kernel CPU quotas still apply.
+Explicit connection counts remain exact and can exceed descriptor capacity, while
+automatic counts leave descriptor headroom for admin, listeners, rings, and other
+application activity. Configurations exceeding the memory sizing allowance or
+available thread allowance fail before listening.
+
+Each automatic large-buffer allowance uses 1 MiB plus one quarter of the remaining
+per-worker sizing allowance, capped at 64 MiB. TLS listeners allocate an automatic
+HTTP/2 budget the same way; cleartext listeners retain a 1 MiB inactive allowance.
+Automatic HTTP/2 worker streams use up to half that budget for estimated stream
+storage, capped at 256 (one inactive slot without TLS). Executor completion queues
+for these streams also count against the sizing allowance. Remaining memory and
+file descriptors determine public slots, within the implementation's existing cap.
+Admission counts and burst are then derived from the final connection capacity.
+
+For non-loopback listeners, a single discoverable physical NIC permits automatic
+IRQ/L3-aware placement. IRQ cores and their SMT siblings are excluded. Ambiguous
+NICs, enabled RPS, or unavailable topology retain scheduler placement.
+`--worker-cpus inherit` forces scheduler placement. An explicit CPU list determines
+worker count when `--workers` is automatic and must fit the serving thread's affinity.
+
+`/debug/config` reports concrete limits plus a `resources` object containing detected
+limits, the sizing estimate, and the sources of worker/connection decisions.
+The info-level `resources_resolved` startup event logs workers, connections,
+large-buffer and HTTP/2 budgets, stream capacity, active/rejecting admission limits,
+burst, threads per worker, and the process memory budget/estimate. It includes
+sizing sources and whether buffer/HTTP/2 settings were automatic. Each worker's
+`worker_resources_resolved` event logs its selected CPU (null for scheduler
+placement) and actual submission/completion ring sizes. These events are enabled
+without verbose or access logging. No sysctls, IRQ settings,
+process limits, or cgroup settings are changed.
+
+Linux interface references: [cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html),
+[v1 CPU quotas](https://docs.kernel.org/scheduler/sched-bwc.html),
+[v1 memory](https://docs.kernel.org/admin-guide/cgroup-v1/memory.html), and
+[network CPU placement](https://docs.kernel.org/networking/scaling.html).
+
 ## Choose a starting configuration
 
-1. **Allocate CPU time.** Start with one transport worker and increase while useful
+1. **Allocate CPU time.** Start with automatic sizing and adjust while useful
    throughput improves without unacceptable tail latency. For a dedicated built-in
    server, test up to one worker per available physical core. Generated applications
    also need CPU for lane threads; reserve headroom for those threads, NIC interrupts,
@@ -57,16 +125,16 @@ remain shared. Use separate servers when independent admission capacity is requi
 
 | Control | Default | Sizing notes |
 | --- | --- | --- |
-| `--workers` | 1 | Transport threads, including the serving caller. |
-| `--max-connections` | 256 per worker | Public sockets; admin reserves eight slots once on worker zero. |
+| `--workers` | Automatic | CPU allocation, lane threads, memory, and resource limits; includes the serving caller. |
+| `--max-connections` | Automatic per worker | Public sockets; admin reserves eight slots once on worker zero. |
 | `--max-active` / `--max-rejecting` | 3/4 and 1/8 of public slots, each at least 1 | Explicit counts cannot exceed the per-worker connection budget. |
 | `--rate` / `--burst` | Disabled / effective max-active | Request rate and burst are per worker. |
 | `--rejection-rate` | 1,000/s per worker | `--max-rejecting 0` closes excess requests without 503 responses. |
 | `Config.application_bytes` | 64 KiB per live application exchange | Library setting; buffered bodies and scratch share this capacity. |
 | `--max-body-bytes` | 64 MiB | Server limit; generated routes default to 64 KiB and may impose a smaller limit. |
-| `--large-buffer-bytes` | 64 MiB per worker | Leased large buffers; caches and small buffers are additional. |
-| `--http2-max-streams` / `--http2-worker-streams` | 100 per connection / 256 per worker | Reset streams with running hooks still occupy worker capacity. |
-| `--http2-memory-bytes` | 64 MiB per worker | Protocol, transport, stream, and cached allocations; see [HTTP/2](http2.md). |
+| `--large-buffer-bytes` | Automatic, up to 64 MiB per worker | Leased large buffers; caches and small buffers are additional. |
+| `--http2-max-streams` / `--http2-worker-streams` | 100 per connection / automatic per worker | Reset streams with running hooks still occupy worker capacity. |
+| `--http2-memory-bytes` | Automatic, up to 64 MiB per worker | Protocol, transport, stream, and cached allocations; see [HTTP/2](http2.md). |
 | Header / body / write / idle timeouts | 5 s / 30 s / 5 s / 15 s | Each has a `--*-timeout-ms` option; lane deadlines also apply to generated endpoints. |
 | `--tls-handshake-timeout-ms` | 5 s | Separate from the first request's header deadline. |
 | `--max-requests` | 1,000 per connection | Increase for long-running reuse workloads if connection turnover is unnecessary. |
@@ -92,7 +160,7 @@ to inspect effective runtime limits.
 ## Workers and resource budgets
 
 `--workers N` starts N event-loop threads, including the calling thread; the
-default is one. For example:
+default is automatic. For example, an explicit allocation is:
 
 ```sh
 ./zig-out/bin/zhtps --workers 16 --max-connections 2048 --max-active 512
@@ -110,7 +178,7 @@ Each accepted connection stays on its worker for its entire lifetime. All
 workers initialize before readiness is reported, including when port zero is
 used. Startup errors unwind initialized workers; fatal loop errors signal the
 other workers to drain. Threads join before storage is freed. Workers use the
-process's allowed CPUs by default. `--worker-cpus 9,10-12 --workers 4` pins
+process's allowed CPUs, with automatic NIC placement when supported. `--worker-cpus 9,10-12 --workers 4` pins
 workers in that order; each worker needs a distinct logical CPU. IDs must be
 between 0 and 1023 and within the serving thread's inherited allowed set.
 Invalid or unavailable mappings fail startup before readiness. The library's
@@ -193,8 +261,8 @@ Admin slots have private request objects reserved at startup. Metrics expose
 Larger headers, paths, trailers, responses, and application scratch borrow
 buffers from worker-local pools.
 The default receive buffer remains 16 KiB. Protocol size limits are unchanged.
-`--large-buffer-bytes N` bounds leased large-buffer bytes per worker (default
-64 MiB). Each size class also caches returned buffers: up to 64 blocks within
+`--large-buffer-bytes N` bounds leased large-buffer bytes per worker (automatic by
+default, up to 64 MiB). Each size class also caches returned buffers: up to 64 blocks within
 4 MiB, or up to eight blocks when that allowance exceeds 4 MiB. The cache grows
 on demand and does not reserve this memory at startup.
 Exhaustion returns 503 and closes the request connection. Admin slots reserve

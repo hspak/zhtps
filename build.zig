@@ -290,6 +290,10 @@ pub fn build(b: *std.Build) void {
     http2_wire.addArtifactArg(tls_application);
     b.step("test-http2", "Check multiplexed HTTP/2 over TLS with real clients").dependOn(&http2_wire.step);
     wire.addArtifactArg(exe);
+    const automatic_wire = b.addSystemCommand(&.{ "python3", "tests/automatic_resources.py" });
+    automatic_wire.addArtifactArg(exe);
+    wire.step.dependOn(&automatic_wire.step);
+    b.step("test-resources", "Check automatic resource sizing and explicit overrides").dependOn(&automatic_wire.step);
     const kernel_wire = b.addSystemCommand(&.{ "python3", "tests/kernel_work.py" });
     kernel_wire.addArtifactArg(exe);
     kernel_wire.step.dependOn(&wire.step);
@@ -374,6 +378,11 @@ fn addEndpointDeclarationTests(
         "an application must declare at least one lane",
         "streaming endpoints need a body consumer",
         "body consumers require the stream policy",
+        "unknown option: cache_contol",
+        "duplicate endpoint method and path pattern",
+        "endpoint group prefixes must not end with '/'",
+        "static index_file must be a single permitted filename",
+        "static cache_control must be a valid HTTP field",
     };
     for (errors, 0..) |message, index| {
         const scenario = b.addOptions();
