@@ -1,0 +1,1550 @@
+{
+  "schema_version": 1,
+  "description": "Recorded run setup and summarized results; historical paths identify original artifacts.",
+  "raw_measurements_retained": false,
+  "records": {
+    "docs/request-critical-path/components.json": {
+      "original_sha256": "9f965c1fae580fcb739bd029761299664611c069159a1f09e030a8fd7c7cd56a",
+      "omitted_fields": {},
+      "record": {
+        "recorded_utc": "2026-09-11T19:02:56.225253+00:00",
+        "kernel": "7.2.4-arch1-2-strixhalo",
+        "cpu": 2,
+        "cpu_model": "AMD Ryzen AI MAX+ 395",
+        "zig": "0.16.0",
+        "optimization": "ReleaseSafe",
+        "cpu_target": "x86_64_v3",
+        "hashes": {
+          "src/http.zig": "9804b0f4481c10a30afdf19e5e386d069f8aa2ecd44190bb885f7f0b391cb440",
+          "src/application.zig": "edfaca6a8b947581f0aa88d54b65c224f3b438758610151c35594776f3b4ce7b",
+          "src/Logger.zig": "fe8a0096131ff6caf0185da6ad683a8de44d9257aaa19d0b69264947ba7bde25",
+          "src/metrics_format.zig": "37f097bcd99ca0cf676c19ac5e2ec31a7f74b952131d7dd271261a0047ffe9c5",
+          "src/main.zig": "fe060247032b12e8972564214952de333fc5eaff44376243d418cb6da03f31c7",
+          "src/Config.zig": "3eb7ac536e98c3212b503925ea65a76122b0158715341a6b1fcd63dc115429c3",
+          "src/Admission.zig": "1d672a558055c45b40e2d4b16c58beecec5e08f44065dfb10f2df4352b29dd50",
+          "src/Metrics.zig": "0bd2f56470854397ba5ad27af79fe072a695f6fdb12528e4ea411072911c9505",
+          "src/platform.zig": "67570f8fe2cbe9620594a41d7bffd2fb6362699dd796eaf746c245315a245599",
+          "src/root.zig": "954d2d62192a6814ddc37831948d2f4d517c01040cf66bc63ca49d00196aaa0b",
+          "src/server.zig": "68e0a47bc8b8846264f93da17fc5b18b1ecb218829f0c23a8833132078eee96b",
+          "src/http/date.zig": "00ed55ca0de74ab1f3959bfecc44891594ce3bbb36dc277e2ea2f2ba063ebd89",
+          "src/http/Response.zig": "115e581b41f2ddc7abb33c9a075bdab08d67fc1d15eace040eb99c89ea16632a",
+          "src/http/syntax.zig": "248b0a2bd91b2b0457dd460cd6f2f7bd3c597a09f7264e1e1313a8c0e8b252db",
+          "src/http/Request.zig": "13009ae49bf985c953969e82299c4ceea50499085fcc01120023d90b02fd00fa",
+          "src/http/conditions.zig": "2154cb4878d727b292530fa1f3ac5bdf3571835641a1321104badaaa145b701a",
+          "src/http/Parser.zig": "5a0560fabc64131df4390160a3843fa2de5790f0777d123e1e09568f875153b6",
+          "src/metrics_format/prometheus.zig": "38752cec115621624b606726bf5adfb261ff90b70367c62fcabd86591d66e426",
+          "src/metrics_format/json.zig": "b477e08f9e77350f2ce21012319ba1730cf56a3520d0112f0e1004198034beba",
+          "src/application/Exchange.zig": "d5cb53d8d113039a351b9e62a21aa29c621abc6d7ba5f0e1bb1b089f0b94402d",
+          "bench/hot_paths.zig": "9bcef71772ade6c975a416fbfdc1783f437c8b04a96bc9a1d172aa2918b35424",
+          "docs/request-critical-path/measure.zig": "aba3332d4adbe8275a7196153ee95dd6aa53ca6e0dddd4b30aa0749a78c2ab39",
+          "/tmp/zhtps-request-costs": "b95ca6ba3d043f0817769c9ece914dc940a78e54348659b96ee18e70c3983820",
+          "/tmp/zhtps-critical-path/bin/hot-paths": "a72f625b4d07b985730ac00c7f28ee5ed0a8b41a4e32b08db9745a0ddccb87a7",
+          "/tmp/zhtps-critical-path/bin/zhtps": "f4b8ed58842932ac14362863dfbadaa50d4056cbaf5d5306f4cb358ec366d907"
+        },
+        "sizes": {
+          "parser_bytes": 12592,
+          "exchange_bytes": 128,
+          "connection_bytes": 12944,
+          "phase_offset": 12936,
+          "deadline_offset": 12888
+        },
+        "supplementary_runs": [
+          [
+            {
+              "parser_bytes": 12592,
+              "exchange_bytes": 128,
+              "connection_bytes": 12944,
+              "phase_offset": 12936,
+              "deadline_offset": 12888
+            },
+            {
+              "case": "monotonic",
+              "iterations": 5000000,
+              "elapsed_ns": 82212838
+            },
+            {
+              "case": "realtime",
+              "iterations": 5000000,
+              "elapsed_ns": 82197670
+            },
+            {
+              "case": "application",
+              "iterations": 5000000,
+              "elapsed_ns": 153677514
+            },
+            {
+              "case": "response",
+              "iterations": 5000000,
+              "elapsed_ns": 389510969
+            },
+            {
+              "case": "log_record",
+              "iterations": 5000000,
+              "elapsed_ns": 959180577
+            }
+          ],
+          [
+            {
+              "parser_bytes": 12592,
+              "exchange_bytes": 128,
+              "connection_bytes": 12944,
+              "phase_offset": 12936,
+              "deadline_offset": 12888
+            },
+            {
+              "case": "monotonic",
+              "iterations": 5000000,
+              "elapsed_ns": 82214721
+            },
+            {
+              "case": "realtime",
+              "iterations": 5000000,
+              "elapsed_ns": 82210033
+            },
+            {
+              "case": "application",
+              "iterations": 5000000,
+              "elapsed_ns": 172231202
+            },
+            {
+              "case": "response",
+              "iterations": 5000000,
+              "elapsed_ns": 391890908
+            },
+            {
+              "case": "log_record",
+              "iterations": 5000000,
+              "elapsed_ns": 951739367
+            }
+          ],
+          [
+            {
+              "parser_bytes": 12592,
+              "exchange_bytes": 128,
+              "connection_bytes": 12944,
+              "phase_offset": 12936,
+              "deadline_offset": 12888
+            },
+            {
+              "case": "monotonic",
+              "iterations": 5000000,
+              "elapsed_ns": 82214972
+            },
+            {
+              "case": "realtime",
+              "iterations": 5000000,
+              "elapsed_ns": 82230622
+            },
+            {
+              "case": "application",
+              "iterations": 5000000,
+              "elapsed_ns": 154757526
+            },
+            {
+              "case": "response",
+              "iterations": 5000000,
+              "elapsed_ns": 390422275
+            },
+            {
+              "case": "log_record",
+              "iterations": 5000000,
+              "elapsed_ns": 953941971
+            }
+          ]
+        ],
+        "supplementary_summary": {
+          "monotonic": {
+            "median_ns": 16.4429442,
+            "min_ns": 16.4425676,
+            "max_ns": 16.4429944
+          },
+          "realtime": {
+            "median_ns": 16.4420066,
+            "min_ns": 16.439534,
+            "max_ns": 16.4461244
+          },
+          "application": {
+            "median_ns": 30.9515052,
+            "min_ns": 30.7355028,
+            "max_ns": 34.4462404
+          },
+          "response": {
+            "median_ns": 78.084455,
+            "min_ns": 77.9021938,
+            "max_ns": 78.3781816
+          },
+          "log_record": {
+            "median_ns": 190.7883942,
+            "min_ns": 190.3478734,
+            "max_ns": 191.8361154
+          }
+        },
+        "existing_benchmark_runs": [
+          [
+            {
+              "case": "admission_unlimited",
+              "iterations": 20000000,
+              "elapsed_ns": 23928809,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "admission_allowed",
+              "iterations": 20000000,
+              "elapsed_ns": 29526529,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "admission_overload",
+              "iterations": 20000000,
+              "elapsed_ns": 32099651,
+              "decisions": [
+                5000255,
+                20999,
+                14978746
+              ]
+            },
+            {
+              "case": "admission_draining",
+              "iterations": 20000000,
+              "elapsed_ns": 28984951,
+              "decisions": [
+                0,
+                80999,
+                19919001
+              ]
+            },
+            {
+              "case": "admission_idle",
+              "iterations": 20000000,
+              "elapsed_ns": 30930441,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "histogram_short",
+              "iterations": 20000000,
+              "elapsed_ns": 7864496,
+              "sum_ns": 100000000000
+            },
+            {
+              "case": "histogram_medium",
+              "iterations": 20000000,
+              "elapsed_ns": 9251997,
+              "sum_ns": 2000000000000
+            },
+            {
+              "case": "histogram_mixed",
+              "iterations": 20000000,
+              "elapsed_ns": 14981104,
+              "sum_ns": 1861517167769676
+            },
+            {
+              "case": "parser_short",
+              "iterations": 1000000,
+              "elapsed_ns": 175550622
+            },
+            {
+              "case": "parser_headers",
+              "iterations": 1000000,
+              "elapsed_ns": 973766295
+            }
+          ],
+          [
+            {
+              "case": "admission_unlimited",
+              "iterations": 20000000,
+              "elapsed_ns": 23674009,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "admission_allowed",
+              "iterations": 20000000,
+              "elapsed_ns": 29188043,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "admission_overload",
+              "iterations": 20000000,
+              "elapsed_ns": 32237681,
+              "decisions": [
+                5000255,
+                20999,
+                14978746
+              ]
+            },
+            {
+              "case": "admission_draining",
+              "iterations": 20000000,
+              "elapsed_ns": 23775911,
+              "decisions": [
+                0,
+                80999,
+                19919001
+              ]
+            },
+            {
+              "case": "admission_idle",
+              "iterations": 20000000,
+              "elapsed_ns": 31104960,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "histogram_short",
+              "iterations": 20000000,
+              "elapsed_ns": 7876969,
+              "sum_ns": 100000000000
+            },
+            {
+              "case": "histogram_medium",
+              "iterations": 20000000,
+              "elapsed_ns": 11768831,
+              "sum_ns": 2000000000000
+            },
+            {
+              "case": "histogram_mixed",
+              "iterations": 20000000,
+              "elapsed_ns": 14744259,
+              "sum_ns": 1861517167769676
+            },
+            {
+              "case": "parser_short",
+              "iterations": 1000000,
+              "elapsed_ns": 176754417
+            },
+            {
+              "case": "parser_headers",
+              "iterations": 1000000,
+              "elapsed_ns": 946049000
+            }
+          ],
+          [
+            {
+              "case": "admission_unlimited",
+              "iterations": 20000000,
+              "elapsed_ns": 23982360,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "admission_allowed",
+              "iterations": 20000000,
+              "elapsed_ns": 28874152,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "admission_overload",
+              "iterations": 20000000,
+              "elapsed_ns": 37138862,
+              "decisions": [
+                5000255,
+                20999,
+                14978746
+              ]
+            },
+            {
+              "case": "admission_draining",
+              "iterations": 20000000,
+              "elapsed_ns": 29478530,
+              "decisions": [
+                0,
+                80999,
+                19919001
+              ]
+            },
+            {
+              "case": "admission_idle",
+              "iterations": 20000000,
+              "elapsed_ns": 31125318,
+              "decisions": [
+                20000000,
+                0,
+                0
+              ]
+            },
+            {
+              "case": "histogram_short",
+              "iterations": 20000000,
+              "elapsed_ns": 7881668,
+              "sum_ns": 100000000000
+            },
+            {
+              "case": "histogram_medium",
+              "iterations": 20000000,
+              "elapsed_ns": 10716311,
+              "sum_ns": 2000000000000
+            },
+            {
+              "case": "histogram_mixed",
+              "iterations": 20000000,
+              "elapsed_ns": 14751613,
+              "sum_ns": 1861517167769676
+            },
+            {
+              "case": "parser_short",
+              "iterations": 1000000,
+              "elapsed_ns": 173790652
+            },
+            {
+              "case": "parser_headers",
+              "iterations": 1000000,
+              "elapsed_ns": 939907597
+            }
+          ]
+        ],
+        "existing_benchmark_summary": {
+          "admission_unlimited": {
+            "median_ns": 1.19644045,
+            "min_ns": 1.18370045,
+            "max_ns": 1.199118
+          },
+          "admission_allowed": {
+            "median_ns": 1.45940215,
+            "min_ns": 1.4437076,
+            "max_ns": 1.47632645
+          },
+          "admission_overload": {
+            "median_ns": 1.61188405,
+            "min_ns": 1.60498255,
+            "max_ns": 1.8569431
+          },
+          "admission_draining": {
+            "median_ns": 1.44924755,
+            "min_ns": 1.18879555,
+            "max_ns": 1.4739265
+          },
+          "admission_idle": {
+            "median_ns": 1.555248,
+            "min_ns": 1.54652205,
+            "max_ns": 1.5562659
+          },
+          "histogram_short": {
+            "median_ns": 0.39384845,
+            "min_ns": 0.3932248,
+            "max_ns": 0.3940834
+          },
+          "histogram_medium": {
+            "median_ns": 0.53581555,
+            "min_ns": 0.46259985,
+            "max_ns": 0.58844155
+          },
+          "histogram_mixed": {
+            "median_ns": 0.73758065,
+            "min_ns": 0.73721295,
+            "max_ns": 0.7490552
+          },
+          "parser_short": {
+            "median_ns": 175.550622,
+            "min_ns": 173.790652,
+            "max_ns": 176.754417
+          },
+          "parser_headers": {
+            "median_ns": 946.049,
+            "min_ns": 939.907597,
+            "max_ns": 973.766295
+          }
+        },
+        "supplementary_recorded_utc": "2026-09-11T19:08:02.945877+00:00"
+      }
+    },
+    "docs/request-critical-path/load-summary.json": {
+      "original_sha256": "5a7291283317fde7ce106eedc8a56051248a9b847bd858a158b3c7ba141e5b22",
+      "omitted_fields": {},
+      "record": {
+        "/tmp/zhtps-critical-path-load.json": {
+          "config": {
+            "address": "127.0.0.1",
+            "port": 46725,
+            "admin_address": "127.0.0.1",
+            "admin_port": 40609,
+            "workers": 1,
+            "max_connections": 256,
+            "admin_connections": 8,
+            "header_bytes": 32768,
+            "trailer_bytes": 8192,
+            "receive_bytes": 16384,
+            "response_bytes": 32768,
+            "application_bytes": 65536,
+            "max_body_bytes": 67108864,
+            "header_timeout_ms": 5000,
+            "body_timeout_ms": 30000,
+            "write_timeout_ms": 5000,
+            "idle_timeout_ms": 15000,
+            "close_timeout_ms": 100,
+            "shutdown_timeout_ms": 5000,
+            "max_requests_per_connection": 4294967295,
+            "completion_budget": 64,
+            "log_slots": 256,
+            "verbose": false,
+            "access_log": false,
+            "admission": {
+              "max_active": 192,
+              "max_rejecting": 32,
+              "requests_per_second": 0,
+              "burst": 192,
+              "rejections_per_second": 1000
+            }
+          },
+          "phases": [
+            {
+              "label": "warmup",
+              "offered_rate": 50000,
+              "seconds": 2,
+              "sent_rate": 49991,
+              "goodput": 49991,
+              "success_percent": 99.982,
+              "unsent_percent": 0.018,
+              "http_failures_per_second": 0.0,
+              "transport_failures_per_second": 0.0,
+              "success_p99_ms": 1.253375,
+              "service_p99_ms": 0.217087,
+              "rejection_p99_ms": null,
+              "failure_p99_ms": null,
+              "scheduler_p99_ms": 1.073151,
+              "failures": {},
+              "admin_errors": 0,
+              "success_latency_count": 99982,
+              "success_p999_ms": 6.324223,
+              "success_p9999_ms": 7.733247,
+              "success_max_ms": 11.099075999999998,
+              "service_latency_count": 99982,
+              "service_p999_ms": 0.481279,
+              "service_p9999_ms": 7.733247,
+              "service_max_ms": 9.483772,
+              "rejection_latency_count": 0,
+              "rejection_p999_ms": null,
+              "rejection_p9999_ms": null,
+              "rejection_max_ms": null,
+              "failure_latency_count": 0,
+              "failure_p999_ms": null,
+              "failure_p9999_ms": null,
+              "failure_max_ms": null,
+              "scheduler_latency_count": 100000,
+              "scheduler_p999_ms": 1.0895350000000001,
+              "scheduler_p9999_ms": 1.1304949999999998,
+              "scheduler_max_ms": 1.27207,
+              "dial_attempts": 64,
+              "request_bytes_written": 4099262,
+              "response_bytes_validated": 599892,
+              "meets_baseline_target": true,
+              "rss_min_mib": 44.09765625,
+              "rss_max_mib": 44.09765625,
+              "fds_max": 71,
+              "tcp_time_wait_max": 13,
+              "tcp_mem_pages_max": 3375,
+              "server_cpu_cores": 0.13000014261015644,
+              "client_cpu_cores": 0.5600006143206739,
+              "server_core_busy_percent": 30.76923076923077,
+              "server_core_busy_percent_by_cpu": {
+                "cpu2": 30.76923076923077
+              },
+              "server_core_busy_percent_max": 30.76923076923077,
+              "sampled_requests_admitted_total_per_second": 49969.05481605313,
+              "sampled_requests_rejected_total_per_second": 0.0,
+              "sampled_listen_overflows": 0
+            },
+            {
+              "label": "allowed",
+              "offered_rate": 100000,
+              "seconds": 5,
+              "sent_rate": 99999.4,
+              "goodput": 99999.4,
+              "success_percent": 99.9994,
+              "unsent_percent": 0.0006,
+              "http_failures_per_second": 0.0,
+              "transport_failures_per_second": 0.0,
+              "success_p99_ms": 1.1304949999999998,
+              "service_p99_ms": 0.220159,
+              "rejection_p99_ms": null,
+              "failure_p99_ms": null,
+              "scheduler_p99_ms": 0.978943,
+              "failures": {},
+              "admin_errors": 0,
+              "success_latency_count": 499997,
+              "success_p999_ms": 1.3271030000000001,
+              "success_p9999_ms": 2.326527,
+              "success_max_ms": 2.790706,
+              "service_latency_count": 499997,
+              "service_p999_ms": 0.294911,
+              "service_p9999_ms": 1.646591,
+              "service_max_ms": 2.245625,
+              "rejection_latency_count": 0,
+              "rejection_p999_ms": null,
+              "rejection_p9999_ms": null,
+              "rejection_max_ms": null,
+              "failure_latency_count": 0,
+              "failure_p999_ms": null,
+              "failure_p9999_ms": null,
+              "failure_max_ms": null,
+              "scheduler_latency_count": 500000,
+              "scheduler_p999_ms": 1.0977270000000001,
+              "scheduler_p9999_ms": 1.1304949999999998,
+              "scheduler_max_ms": 1.395543,
+              "dial_attempts": 0,
+              "request_bytes_written": 20499877,
+              "response_bytes_validated": 2999982,
+              "meets_baseline_target": true,
+              "rss_min_mib": 44.09765625,
+              "rss_max_mib": 44.09765625,
+              "fds_max": 71,
+              "tcp_time_wait_max": 13,
+              "tcp_mem_pages_max": 2863,
+              "server_cpu_cores": 0.3525007168102076,
+              "client_cpu_cores": 1.000002033504135,
+              "server_core_busy_percent": 62.5,
+              "server_core_busy_percent_by_cpu": {
+                "cpu2": 62.5
+              },
+              "server_core_busy_percent_max": 62.5,
+              "sampled_requests_admitted_total_per_second": 99996.2033422795,
+              "sampled_requests_rejected_total_per_second": 0.0,
+              "sampled_listen_overflows": 0
+            },
+            {
+              "label": "higher",
+              "offered_rate": 200000,
+              "seconds": 5,
+              "sent_rate": 199983,
+              "goodput": 199970.2,
+              "success_percent": 99.9915,
+              "unsent_percent": 0.0085,
+              "http_failures_per_second": 0.0,
+              "transport_failures_per_second": 0.0,
+              "success_p99_ms": 1.1878389999999999,
+              "service_p99_ms": 0.24166300000000002,
+              "rejection_p99_ms": null,
+              "failure_p99_ms": null,
+              "scheduler_p99_ms": 1.044479,
+              "failures": {},
+              "admin_errors": 0,
+              "success_latency_count": 999915,
+              "success_p999_ms": 1.302527,
+              "success_p9999_ms": 1.990655,
+              "success_max_ms": 2.321297,
+              "service_latency_count": 999915,
+              "service_p999_ms": 0.319487,
+              "service_p9999_ms": 0.741375,
+              "service_max_ms": 1.2137229999999999,
+              "rejection_latency_count": 0,
+              "rejection_p999_ms": null,
+              "rejection_p9999_ms": null,
+              "rejection_max_ms": null,
+              "failure_latency_count": 0,
+              "failure_p999_ms": null,
+              "failure_p9999_ms": null,
+              "failure_max_ms": null,
+              "scheduler_latency_count": 1000000,
+              "scheduler_p999_ms": 1.122303,
+              "scheduler_p9999_ms": 1.138687,
+              "scheduler_max_ms": 1.1958389999999999,
+              "dial_attempts": 0,
+              "request_bytes_written": 40996515,
+              "response_bytes_validated": 5999490,
+              "meets_baseline_target": true,
+              "rss_min_mib": 44.09765625,
+              "rss_max_mib": 44.09765625,
+              "fds_max": 71,
+              "tcp_time_wait_max": 11,
+              "tcp_mem_pages_max": 3119,
+              "server_cpu_cores": 0.45499940156203705,
+              "client_cpu_cores": 1.8949975076045282,
+              "server_core_busy_percent": 78.25,
+              "server_core_busy_percent_by_cpu": {
+                "cpu2": 78.25
+              },
+              "server_core_busy_percent_max": 78.25,
+              "sampled_requests_admitted_total_per_second": 199983.23697204757,
+              "sampled_requests_rejected_total_per_second": 0.0,
+              "sampled_listen_overflows": 0
+            },
+            {
+              "label": "recovery",
+              "offered_rate": 100000,
+              "seconds": 3,
+              "sent_rate": 99973.33333333333,
+              "goodput": 99973.33333333333,
+              "success_percent": 99.97333333333333,
+              "unsent_percent": 0.02666666666666667,
+              "http_failures_per_second": 0.0,
+              "transport_failures_per_second": 0.0,
+              "success_p99_ms": 1.163263,
+              "service_p99_ms": 0.238591,
+              "rejection_p99_ms": null,
+              "failure_p99_ms": null,
+              "scheduler_p99_ms": 1.0158070000000001,
+              "failures": {},
+              "admin_errors": 0,
+              "success_latency_count": 299920,
+              "success_p999_ms": 1.294335,
+              "success_p9999_ms": 1.441791,
+              "success_max_ms": 2.061757,
+              "service_latency_count": 299920,
+              "service_p999_ms": 0.323583,
+              "service_p9999_ms": 0.39935899999999996,
+              "service_max_ms": 1.653821,
+              "rejection_latency_count": 0,
+              "rejection_p999_ms": null,
+              "rejection_p9999_ms": null,
+              "rejection_max_ms": null,
+              "failure_latency_count": 0,
+              "failure_p999_ms": null,
+              "failure_p9999_ms": null,
+              "failure_max_ms": null,
+              "scheduler_latency_count": 300000,
+              "scheduler_p999_ms": 1.105919,
+              "scheduler_p9999_ms": 1.138687,
+              "scheduler_max_ms": 1.200669,
+              "dial_attempts": 0,
+              "request_bytes_written": 12296720,
+              "response_bytes_validated": 1799520,
+              "meets_baseline_target": true,
+              "rss_min_mib": 44.09765625,
+              "rss_max_mib": 44.09765625,
+              "fds_max": 71,
+              "tcp_time_wait_max": 13,
+              "tcp_mem_pages_max": 3119,
+              "server_cpu_cores": 0.3100018473010081,
+              "client_cpu_cores": 1.095006525143884,
+              "server_core_busy_percent": 56.28140703517588,
+              "server_core_busy_percent_by_cpu": {
+                "cpu2": 56.28140703517588
+              },
+              "server_core_busy_percent_max": 56.28140703517588,
+              "sampled_requests_admitted_total_per_second": 99991.59584991967,
+              "sampled_requests_rejected_total_per_second": 0.0,
+              "sampled_listen_overflows": 0
+            }
+          ],
+          "server_exit": 0,
+          "kernel_delta": {
+            "ListenOverflows": 0,
+            "ListenDrops": 0,
+            "TCPReqQFullDoCookies": 0,
+            "TCPReqQFullDrop": 0,
+            "TCPBacklogDrop": 0
+          }
+        }
+      }
+    },
+    "docs/request-critical-path/load.client.json": {
+      "original_sha256": "0979530302caf6504f521cc91ac3036fa9c4e2105dfb6fc4434b96cb71fcf3ac",
+      "omitted_fields": {},
+      "record": {
+        "churn": false,
+        "connections": 64,
+        "elapsed_seconds": 15.000379572,
+        "generator_cpu_seconds": 19.003641,
+        "go_version": "go1.27.1-X:nodwarf5",
+        "gomaxprocs": 8,
+        "max_generator_lag_ms": 10,
+        "phases": [
+          {
+            "connections_opened": 64,
+            "dial_attempts": 64,
+            "duration_seconds": 2,
+            "end_unix_ns": 1789153222601353519,
+            "failure_latency": {
+              "count": 0,
+              "max_us": 0,
+              "p50_us": 0,
+              "p95_us": 0,
+              "p9999_us": 0,
+              "p999_us": 0,
+              "p99_us": 0
+            },
+            "failures": null,
+            "generator_expired": 18,
+            "generator_queue_drops": 0,
+            "offered": 100000,
+            "offered_rate": 50000,
+            "rejection_latency": {
+              "count": 0,
+              "max_us": 0,
+              "p50_us": 0,
+              "p95_us": 0,
+              "p9999_us": 0,
+              "p999_us": 0,
+              "p99_us": 0
+            },
+            "request_bytes_written": 4099262,
+            "response_bytes_validated": 599892,
+            "scheduler_lag": {
+              "count": 100000,
+              "max_us": 1272.07,
+              "p50_us": 276.479,
+              "p95_us": 1007.615,
+              "p9999_us": 1130.495,
+              "p999_us": 1089.535,
+              "p99_us": 1073.151
+            },
+            "sent": 99982,
+            "sent_per_second": 49991,
+            "start_unix_ns": 1789153220601353519,
+            "started": 99982,
+            "success_latency": {
+              "count": 99982,
+              "max_us": 11099.076,
+              "p50_us": 430.079,
+              "p95_us": 1155.071,
+              "p9999_us": 7733.247,
+              "p999_us": 6324.223,
+              "p99_us": 1253.375
+            },
+            "success_service_latency": {
+              "count": 99982,
+              "max_us": 9483.772,
+              "p50_us": 98.303,
+              "p95_us": 178.175,
+              "p9999_us": 7733.247,
+              "p999_us": 481.279,
+              "p99_us": 217.087
+            },
+            "successes": 99982,
+            "window_successes": 99982,
+            "window_successes_per_second": 49991
+          },
+          {
+            "connections_opened": 0,
+            "dial_attempts": 0,
+            "duration_seconds": 5,
+            "end_unix_ns": 1789153227601353519,
+            "failure_latency": {
+              "count": 0,
+              "max_us": 0,
+              "p50_us": 0,
+              "p95_us": 0,
+              "p9999_us": 0,
+              "p999_us": 0,
+              "p99_us": 0
+            },
+            "failures": null,
+            "generator_expired": 3,
+            "generator_queue_drops": 0,
+            "offered": 500000,
+            "offered_rate": 100000,
+            "rejection_latency": {
+              "count": 0,
+              "max_us": 0,
+              "p50_us": 0,
+              "p95_us": 0,
+              "p9999_us": 0,
+              "p999_us": 0,
+              "p99_us": 0
+            },
+            "request_bytes_written": 20499877,
+            "response_bytes_validated": 2999982,
+            "scheduler_lag": {
+              "count": 500000,
+              "max_us": 1395.543,
+              "p50_us": 6.271,
+              "p95_us": 522.239,
+              "p9999_us": 1130.495,
+              "p999_us": 1097.727,
+              "p99_us": 978.943
+            },
+            "sent": 499997,
+            "sent_per_second": 99999.4,
+            "start_unix_ns": 1789153222601353519,
+            "started": 499997,
+            "success_latency": {
+              "count": 499997,
+              "max_us": 2790.706,
+              "p50_us": 25.855,
+              "p95_us": 716.799,
+              "p9999_us": 2326.527,
+              "p999_us": 1327.103,
+              "p99_us": 1130.495
+            },
+            "success_service_latency": {
+              "count": 499997,
+              "max_us": 2245.625,
+              "p50_us": 17.151,
+              "p95_us": 181.247,
+              "p9999_us": 1646.591,
+              "p999_us": 294.911,
+              "p99_us": 220.159
+            },
+            "successes": 499997,
+            "window_successes": 499997,
+            "window_successes_per_second": 99999.4
+          },
+          {
+            "connections_opened": 0,
+            "dial_attempts": 0,
+            "duration_seconds": 5,
+            "end_unix_ns": 1789153232601353519,
+            "failure_latency": {
+              "count": 0,
+              "max_us": 0,
+              "p50_us": 0,
+              "p95_us": 0,
+              "p9999_us": 0,
+              "p999_us": 0,
+              "p99_us": 0
+            },
+            "failures": null,
+            "generator_expired": 85,
+            "generator_queue_drops": 0,
+            "offered": 1000000,
+            "offered_rate": 200000,
+            "rejection_latency": {
+              "count": 0,
+              "max_us": 0,
+              "p50_us": 0,
+              "p95_us": 0,
+              "p9999_us": 0,
+              "p999_us": 0,
+              "p99_us": 0
+            },
+            "request_bytes_written": 40996515,
+            "response_bytes_validated": 5999490,
+            "scheduler_lag": {
+              "count": 1000000,
+              "max_us": 1195.839,
+              "p50_us": 6.655,
+              "p95_us": 778.239,
+              "p9999_us": 1138.687,
+              "p999_us": 1122.303,
+              "p99_us": 1044.479
+            },
+            "sent": 999915,
+            "sent_per_second": 199983,
+            "start_unix_ns": 1789153227601353519,
+            "started": 999915,
+            "success_latency": {
+              "count": 999915,
+              "max_us": 2321.297,
+              "p50_us": 81.407,
+              "p95_us": 1019.903,
+              "p9999_us": 1990.655,
+              "p999_us": 1302.527,
+              "p99_us": 1187.839
+            },
+            "success_service_latency": {
+              "count": 999915,
+              "max_us": 1213.723,
+              "p50_us": 48.639,
+              "p95_us": 218.111,
+              "p9999_us": 741.375,
+              "p999_us": 319.487,
+              "p99_us": 241.663
+            },
+            "successes": 999915,
+            "window_successes": 999851,
+            "window_successes_per_second": 199970.2
+          },
+          {
+            "connections_opened": 0,
+            "dial_attempts": 0,
+            "duration_seconds": 3,
+            "end_unix_ns": 1789153235601353519,
+            "failure_latency": {
+              "count": 0,
+              "max_us": 0,
+              "p50_us": 0,
+              "p95_us": 0,
+              "p9999_us": 0,
+              "p999_us": 0,
+              "p99_us": 0
+            },
+            "failures": null,
+            "generator_expired": 80,
+            "generator_queue_drops": 0,
+            "offered": 300000,
+            "offered_rate": 100000,
+            "rejection_latency": {
+              "count": 0,
+              "max_us": 0,
+              "p50_us": 0,
+              "p95_us": 0,
+              "p9999_us": 0,
+              "p999_us": 0,
+              "p99_us": 0
+            },
+            "request_bytes_written": 12296720,
+            "response_bytes_validated": 1799520,
+            "scheduler_lag": {
+              "count": 300000,
+              "max_us": 1200.669,
+              "p50_us": 7.775,
+              "p95_us": 696.319,
+              "p9999_us": 1138.687,
+              "p999_us": 1105.919,
+              "p99_us": 1015.807
+            },
+            "sent": 299920,
+            "sent_per_second": 99973.33333333333,
+            "start_unix_ns": 1789153232601353519,
+            "started": 299920,
+            "success_latency": {
+              "count": 299920,
+              "max_us": 2061.757,
+              "p50_us": 29.823,
+              "p95_us": 851.967,
+              "p9999_us": 1441.791,
+              "p999_us": 1294.335,
+              "p99_us": 1163.263
+            },
+            "success_service_latency": {
+              "count": 299920,
+              "max_us": 1653.821,
+              "p50_us": 18.175,
+              "p95_us": 198.655,
+              "p9999_us": 399.359,
+              "p999_us": 323.583,
+              "p99_us": 238.591
+            },
+            "successes": 299920,
+            "window_successes": 299920,
+            "window_successes_per_second": 99973.33333333333
+          }
+        ],
+        "queue_per_shard": 128,
+        "shards": 8,
+        "source_ips": 0,
+        "timeout_ms": 1000,
+        "workload": {
+          "allow_chunked": false,
+          "content_type": "application/octet-stream",
+          "expected_body_bytes": 6,
+          "expected_body_sha256": "5cfdfaa0b8bb79da3a07273efcecc456261ccb2e3c55305446fad1724e534893",
+          "max_requests_per_connection": 0,
+          "method": "GET",
+          "path": "/",
+          "request_body_bytes": 0,
+          "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    "docs/request-critical-path/load.json": {
+      "original_sha256": "ba16a85ff09457524132c614de27f4b930f061ba0b48dfcfa0789398d62cced1",
+      "omitted_fields": {
+        "metrics_after": 1,
+        "metrics_before": 1,
+        "samples": 1,
+        "workers_after": 1,
+        "workers_before": 1
+      },
+      "record": {
+        "status": "complete",
+        "started_unix_ns": 1789153220304839433,
+        "kernel": "7.2.4-arch1-2-strixhalo",
+        "machine": "x86_64",
+        "options": {
+          "output": "/tmp/zhtps-critical-path-load.json",
+          "server_binary": "/tmp/zhtps-critical-path/bin/zhtps",
+          "server_address": "127.0.0.1",
+          "server_port": 0,
+          "target_address": null,
+          "client_host": null,
+          "remote_client_binary": null,
+          "remote_timeout": 3600,
+          "allow_same_host_client": false,
+          "schedule": "50000:2s,100000:5s,200000:5s,100000:3s",
+          "labels": "warmup,allowed,higher,recovery",
+          "server_cpus": "2",
+          "client_cpus": "4-11",
+          "workers": 1,
+          "max_connections": 256,
+          "connections": 64,
+          "shards": 8,
+          "queue": 128,
+          "max_lag": "10ms",
+          "rate_limit": 0,
+          "burst": null,
+          "max_active": null,
+          "rejection_rate": 1000,
+          "churn": false,
+          "access_log": false,
+          "source_ips": 0,
+          "method": "GET",
+          "path": "/",
+          "request_body": null,
+          "expect_body": null,
+          "content_type": "application/octet-stream",
+          "allow_chunked": false,
+          "client_max_requests": 0,
+          "server_max_requests": 4294967295,
+          "timeout": "1s"
+        },
+        "server_command": [
+          "taskset",
+          "-c",
+          "2",
+          "/tmp/zhtps-critical-path/bin/zhtps",
+          "--address",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--admin-port",
+          "0",
+          "--workers",
+          "1",
+          "--max-connections",
+          "256",
+          "--rate",
+          "0",
+          "--rejection-rate",
+          "1000",
+          "--max-requests",
+          "4294967295",
+          "--no-access-log"
+        ],
+        "monitor_cpus": [
+          0
+        ],
+        "server_identity": {
+          "hostname": "benchmark-server",
+          "kernel": "7.2.4-arch1-2-strixhalo",
+          "machine": "x86_64",
+          "boot_id": "server-boot-1",
+          "allowed_cpus": [
+            0
+          ]
+        },
+        "kernel_before": {
+          "ListenOverflows": 243533,
+          "ListenDrops": 243533,
+          "TCPReqQFullDoCookies": 0,
+          "TCPReqQFullDrop": 0,
+          "TCPBacklogDrop": 0,
+          "tcp_inuse": 15,
+          "tcp_orphan": 0,
+          "tcp_tw": 10,
+          "tcp_alloc": 19,
+          "tcp_mem": 4655
+        },
+        "hashes": {
+          "/tmp/zhtps-critical-path/bin/zhtps": "f4b8ed58842932ac14362863dfbadaa50d4056cbaf5d5306f4cb358ec366d907",
+          "zig-out/bench/load": "8fff0bd4b1a2e4f8c2a0106108e3bafb2c26641ae06b66ff7c71ffe4b774d0e9",
+          "src/Admission.zig": "ec5386faa757db2e15546e51ed816a1f80febfb15d1d80391c8c791c5f90d032",
+          "src/Config.zig": "3eb7ac536e98c3212b503925ea65a76122b0158715341a6b1fcd63dc115429c3",
+          "src/Logger.zig": "fe8a0096131ff6caf0185da6ad683a8de44d9257aaa19d0b69264947ba7bde25",
+          "src/Metrics.zig": "f36d84908f22f19adf12fe3b5b2dd5f151d64a36df0a5a30c3f989301411beb6",
+          "src/application/Exchange.zig": "d5cb53d8d113039a351b9e62a21aa29c621abc6d7ba5f0e1bb1b089f0b94402d",
+          "src/application.zig": "edfaca6a8b947581f0aa88d54b65c224f3b438758610151c35594776f3b4ce7b",
+          "src/http/Parser.zig": "5a0560fabc64131df4390160a3843fa2de5790f0777d123e1e09568f875153b6",
+          "src/http/Request.zig": "13009ae49bf985c953969e82299c4ceea50499085fcc01120023d90b02fd00fa",
+          "src/http/Response.zig": "115e581b41f2ddc7abb33c9a075bdab08d67fc1d15eace040eb99c89ea16632a",
+          "src/http/conditions.zig": "2154cb4878d727b292530fa1f3ac5bdf3571835641a1321104badaaa145b701a",
+          "src/http/date.zig": "00ed55ca0de74ab1f3959bfecc44891594ce3bbb36dc277e2ea2f2ba063ebd89",
+          "src/http/syntax.zig": "248b0a2bd91b2b0457dd460cd6f2f7bd3c597a09f7264e1e1313a8c0e8b252db",
+          "src/http.zig": "9804b0f4481c10a30afdf19e5e386d069f8aa2ecd44190bb885f7f0b391cb440",
+          "src/main.zig": "fe060247032b12e8972564214952de333fc5eaff44376243d418cb6da03f31c7",
+          "src/metrics_format/json.zig": "b477e08f9e77350f2ce21012319ba1730cf56a3520d0112f0e1004198034beba",
+          "src/metrics_format/prometheus.zig": "38752cec115621624b606726bf5adfb261ff90b70367c62fcabd86591d66e426",
+          "src/metrics_format.zig": "37f097bcd99ca0cf676c19ac5e2ec31a7f74b952131d7dd271261a0047ffe9c5",
+          "src/platform.zig": "67570f8fe2cbe9620594a41d7bffd2fb6362699dd796eaf746c245315a245599",
+          "src/root.zig": "954d2d62192a6814ddc37831948d2f4d517c01040cf66bc63ca49d00196aaa0b",
+          "src/server.zig": "0e9ee3993f05a447cdba7bce6c3e1205db7700baf68d8f2370cd083350f0aaa6",
+          "bench/load/main.go": "ced492fbe0f8f74dd09cf8b9458ac85df4753c65fc31215d2b060f28946e0f92",
+          "bench/load/offered.go": "1bc256230d4a60b79bcd6816400eb7aab41e563203a7f707c9c433d87a24edce",
+          "bench/remote_load.py": "3471309fa46795208da9d71288c7faca9a0abe74a8d5d3c1973adace89a67054",
+          "bench/overload.py": "29a7223dca4362e4843ac45adc010d178d1266ec771797c9045cd5f4cc4afcb0"
+        },
+        "toolchains": {
+          "zig": "0.16.0",
+          "go": "go version go1.27.1-X:nodwarf5 linux/amd64"
+        },
+        "config": {
+          "address": "127.0.0.1",
+          "port": 46725,
+          "admin_address": "127.0.0.1",
+          "admin_port": 40609,
+          "workers": 1,
+          "max_connections": 256,
+          "admin_connections": 8,
+          "header_bytes": 32768,
+          "trailer_bytes": 8192,
+          "receive_bytes": 16384,
+          "response_bytes": 32768,
+          "application_bytes": 65536,
+          "max_body_bytes": 67108864,
+          "header_timeout_ms": 5000,
+          "body_timeout_ms": 30000,
+          "write_timeout_ms": 5000,
+          "idle_timeout_ms": 15000,
+          "close_timeout_ms": 100,
+          "shutdown_timeout_ms": 5000,
+          "max_requests_per_connection": 4294967295,
+          "completion_budget": 64,
+          "log_slots": 256,
+          "verbose": false,
+          "access_log": false,
+          "admission": {
+            "max_active": 192,
+            "max_rejecting": 32,
+            "requests_per_second": 0,
+            "burst": 192,
+            "rejections_per_second": 1000
+          }
+        },
+        "client_command": [
+          "taskset",
+          "-c",
+          "4-11",
+          "./zig-out/bench/load",
+          "-address",
+          "127.0.0.1:46725",
+          "-schedule",
+          "50000:2s,100000:5s,200000:5s,100000:3s",
+          "-connections",
+          "64",
+          "-shards",
+          "8",
+          "-queue",
+          "128",
+          "-max-lag",
+          "10ms",
+          "-timeout",
+          "1s",
+          "-source-ips",
+          "0",
+          "-method",
+          "GET",
+          "-path",
+          "/",
+          "-content-type",
+          "application/octet-stream",
+          "-max-requests",
+          "0"
+        ],
+        "client_pid": 86838,
+        "server_pid": 86836,
+        "client": {
+          "churn": false,
+          "connections": 64,
+          "elapsed_seconds": 15.000379572,
+          "generator_cpu_seconds": 19.003641,
+          "go_version": "go1.27.1-X:nodwarf5",
+          "gomaxprocs": 8,
+          "max_generator_lag_ms": 10,
+          "phases": [
+            {
+              "connections_opened": 64,
+              "dial_attempts": 64,
+              "duration_seconds": 2,
+              "end_unix_ns": 1789153222601353519,
+              "failure_latency": {
+                "count": 0,
+                "max_us": 0,
+                "p50_us": 0,
+                "p95_us": 0,
+                "p9999_us": 0,
+                "p999_us": 0,
+                "p99_us": 0
+              },
+              "failures": null,
+              "generator_expired": 18,
+              "generator_queue_drops": 0,
+              "offered": 100000,
+              "offered_rate": 50000,
+              "rejection_latency": {
+                "count": 0,
+                "max_us": 0,
+                "p50_us": 0,
+                "p95_us": 0,
+                "p9999_us": 0,
+                "p999_us": 0,
+                "p99_us": 0
+              },
+              "request_bytes_written": 4099262,
+              "response_bytes_validated": 599892,
+              "scheduler_lag": {
+                "count": 100000,
+                "max_us": 1272.07,
+                "p50_us": 276.479,
+                "p95_us": 1007.615,
+                "p9999_us": 1130.495,
+                "p999_us": 1089.535,
+                "p99_us": 1073.151
+              },
+              "sent": 99982,
+              "sent_per_second": 49991,
+              "start_unix_ns": 1789153220601353519,
+              "started": 99982,
+              "success_latency": {
+                "count": 99982,
+                "max_us": 11099.076,
+                "p50_us": 430.079,
+                "p95_us": 1155.071,
+                "p9999_us": 7733.247,
+                "p999_us": 6324.223,
+                "p99_us": 1253.375
+              },
+              "success_service_latency": {
+                "count": 99982,
+                "max_us": 9483.772,
+                "p50_us": 98.303,
+                "p95_us": 178.175,
+                "p9999_us": 7733.247,
+                "p999_us": 481.279,
+                "p99_us": 217.087
+              },
+              "successes": 99982,
+              "window_successes": 99982,
+              "window_successes_per_second": 49991,
+              "label": "warmup"
+            },
+            {
+              "connections_opened": 0,
+              "dial_attempts": 0,
+              "duration_seconds": 5,
+              "end_unix_ns": 1789153227601353519,
+              "failure_latency": {
+                "count": 0,
+                "max_us": 0,
+                "p50_us": 0,
+                "p95_us": 0,
+                "p9999_us": 0,
+                "p999_us": 0,
+                "p99_us": 0
+              },
+              "failures": null,
+              "generator_expired": 3,
+              "generator_queue_drops": 0,
+              "offered": 500000,
+              "offered_rate": 100000,
+              "rejection_latency": {
+                "count": 0,
+                "max_us": 0,
+                "p50_us": 0,
+                "p95_us": 0,
+                "p9999_us": 0,
+                "p999_us": 0,
+                "p99_us": 0
+              },
+              "request_bytes_written": 20499877,
+              "response_bytes_validated": 2999982,
+              "scheduler_lag": {
+                "count": 500000,
+                "max_us": 1395.543,
+                "p50_us": 6.271,
+                "p95_us": 522.239,
+                "p9999_us": 1130.495,
+                "p999_us": 1097.727,
+                "p99_us": 978.943
+              },
+              "sent": 499997,
+              "sent_per_second": 99999.4,
+              "start_unix_ns": 1789153222601353519,
+              "started": 499997,
+              "success_latency": {
+                "count": 499997,
+                "max_us": 2790.706,
+                "p50_us": 25.855,
+                "p95_us": 716.799,
+                "p9999_us": 2326.527,
+                "p999_us": 1327.103,
+                "p99_us": 1130.495
+              },
+              "success_service_latency": {
+                "count": 499997,
+                "max_us": 2245.625,
+                "p50_us": 17.151,
+                "p95_us": 181.247,
+                "p9999_us": 1646.591,
+                "p999_us": 294.911,
+                "p99_us": 220.159
+              },
+              "successes": 499997,
+              "window_successes": 499997,
+              "window_successes_per_second": 99999.4,
+              "label": "allowed"
+            },
+            {
+              "connections_opened": 0,
+              "dial_attempts": 0,
+              "duration_seconds": 5,
+              "end_unix_ns": 1789153232601353519,
+              "failure_latency": {
+                "count": 0,
+                "max_us": 0,
+                "p50_us": 0,
+                "p95_us": 0,
+                "p9999_us": 0,
+                "p999_us": 0,
+                "p99_us": 0
+              },
+              "failures": null,
+              "generator_expired": 85,
+              "generator_queue_drops": 0,
+              "offered": 1000000,
+              "offered_rate": 200000,
+              "rejection_latency": {
+                "count": 0,
+                "max_us": 0,
+                "p50_us": 0,
+                "p95_us": 0,
+                "p9999_us": 0,
+                "p999_us": 0,
+                "p99_us": 0
+              },
+              "request_bytes_written": 40996515,
+              "response_bytes_validated": 5999490,
+              "scheduler_lag": {
+                "count": 1000000,
+                "max_us": 1195.839,
+                "p50_us": 6.655,
+                "p95_us": 778.239,
+                "p9999_us": 1138.687,
+                "p999_us": 1122.303,
+                "p99_us": 1044.479
+              },
+              "sent": 999915,
+              "sent_per_second": 199983,
+              "start_unix_ns": 1789153227601353519,
+              "started": 999915,
+              "success_latency": {
+                "count": 999915,
+                "max_us": 2321.297,
+                "p50_us": 81.407,
+                "p95_us": 1019.903,
+                "p9999_us": 1990.655,
+                "p999_us": 1302.527,
+                "p99_us": 1187.839
+              },
+              "success_service_latency": {
+                "count": 999915,
+                "max_us": 1213.723,
+                "p50_us": 48.639,
+                "p95_us": 218.111,
+                "p9999_us": 741.375,
+                "p999_us": 319.487,
+                "p99_us": 241.663
+              },
+              "successes": 999915,
+              "window_successes": 999851,
+              "window_successes_per_second": 199970.2,
+              "label": "higher"
+            },
+            {
+              "connections_opened": 0,
+              "dial_attempts": 0,
+              "duration_seconds": 3,
+              "end_unix_ns": 1789153235601353519,
+              "failure_latency": {
+                "count": 0,
+                "max_us": 0,
+                "p50_us": 0,
+                "p95_us": 0,
+                "p9999_us": 0,
+                "p999_us": 0,
+                "p99_us": 0
+              },
+              "failures": null,
+              "generator_expired": 80,
+              "generator_queue_drops": 0,
+              "offered": 300000,
+              "offered_rate": 100000,
+              "rejection_latency": {
+                "count": 0,
+                "max_us": 0,
+                "p50_us": 0,
+                "p95_us": 0,
+                "p9999_us": 0,
+                "p999_us": 0,
+                "p99_us": 0
+              },
+              "request_bytes_written": 12296720,
+              "response_bytes_validated": 1799520,
+              "scheduler_lag": {
+                "count": 300000,
+                "max_us": 1200.669,
+                "p50_us": 7.775,
+                "p95_us": 696.319,
+                "p9999_us": 1138.687,
+                "p999_us": 1105.919,
+                "p99_us": 1015.807
+              },
+              "sent": 299920,
+              "sent_per_second": 99973.33333333333,
+              "start_unix_ns": 1789153232601353519,
+              "started": 299920,
+              "success_latency": {
+                "count": 299920,
+                "max_us": 2061.757,
+                "p50_us": 29.823,
+                "p95_us": 851.967,
+                "p9999_us": 1441.791,
+                "p999_us": 1294.335,
+                "p99_us": 1163.263
+              },
+              "success_service_latency": {
+                "count": 299920,
+                "max_us": 1653.821,
+                "p50_us": 18.175,
+                "p95_us": 198.655,
+                "p9999_us": 399.359,
+                "p999_us": 323.583,
+                "p99_us": 238.591
+              },
+              "successes": 299920,
+              "window_successes": 299920,
+              "window_successes_per_second": 99973.33333333333,
+              "label": "recovery"
+            }
+          ],
+          "queue_per_shard": 128,
+          "shards": 8,
+          "source_ips": 0,
+          "timeout_ms": 1000,
+          "workload": {
+            "allow_chunked": false,
+            "content_type": "application/octet-stream",
+            "expected_body_bytes": 6,
+            "expected_body_sha256": "5cfdfaa0b8bb79da3a07273efcecc456261ccb2e3c55305446fad1724e534893",
+            "max_requests_per_connection": 0,
+            "method": "GET",
+            "path": "/",
+            "request_body_bytes": 0,
+            "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "kernel_after": {
+          "ListenOverflows": 243533,
+          "ListenDrops": 243533,
+          "TCPReqQFullDoCookies": 0,
+          "TCPReqQFullDrop": 0,
+          "TCPBacklogDrop": 0,
+          "tcp_inuse": 20,
+          "tcp_orphan": 0,
+          "tcp_tw": 77,
+          "tcp_alloc": 24,
+          "tcp_mem": 2863
+        },
+        "server_exit": 0,
+        "finished_unix_ns": 1789153236358424699
+      }
+    }
+  }
+}

@@ -26,7 +26,12 @@ pub const Decision = enum {
 };
 const token_scale: u64 = 1_000_000_000;
 
-pub fn init(admission: *Admission, options: Options, now_ns: u64) void {
+/// Starts with full admission and rejection buckets at the supplied monotonic time.
+pub fn init(
+    admission: *Admission,
+    options: Options,
+    now_ns: u64,
+) void {
     admission.* = .{
         .options = options,
         .tokens = @as(u64, options.burst) * token_scale,
@@ -37,7 +42,11 @@ pub fn init(admission: *Admission, options: Options, now_ns: u64) void {
 
 /// Never waits. Every admit/reject decision owns one corresponding permit,
 /// released when the response completes or its connection is abandoned.
-pub fn acquire(admission: *Admission, now_ns: u64, draining: bool) Decision {
+pub fn acquire(
+    admission: *Admission,
+    now_ns: u64,
+    draining: bool,
+) Decision {
     admission.refill(now_ns);
     if (!draining and admission.active < admission.options.max_active and
         (admission.options.requests_per_second == 0 or admission.tokens >= token_scale))
@@ -59,6 +68,7 @@ pub fn exhausted(admission: *const Admission, draining: bool) bool {
     return !can_admit and !can_reject;
 }
 
+/// Reserves a rejection permit and token, or returns close without acquiring either.
 pub fn acquireRejection(admission: *Admission) Decision {
     if (admission.rejecting == admission.options.max_rejecting or
         admission.rejection_tokens < token_scale) return .close;
@@ -67,6 +77,7 @@ pub fn acquireRejection(admission: *Admission) Decision {
     return .reject;
 }
 
+/// Returns an acquired permit. Asserts that its corresponding count is nonzero.
 pub fn release(admission: *Admission, decision: Decision) void {
     switch (decision) {
         .admit => {
@@ -81,6 +92,7 @@ pub fn release(admission: *Admission, decision: Decision) void {
     }
 }
 
+/// Adds elapsed-time credit up to each bucket capacity; backwards time adds no credit.
 pub fn refill(admission: *Admission, now_ns: u64) void {
     const elapsed = now_ns -| admission.last_refill_ns;
     admission.last_refill_ns = now_ns;
@@ -98,7 +110,12 @@ pub fn refill(admission: *Admission, now_ns: u64) void {
     );
 }
 
-fn refillBucket(tokens: u64, burst: u32, rate: u32, elapsed: u64) u64 {
+fn refillBucket(
+    tokens: u64,
+    burst: u32,
+    rate: u32,
+    elapsed: u64,
+) u64 {
     const capacity = @as(u64, burst) * token_scale;
     if (tokens >= capacity) return capacity;
     // A balance is at most maxInt(u32) * token_scale. Adding at most one
@@ -111,7 +128,11 @@ fn refillBucket(tokens: u64, burst: u32, rate: u32, elapsed: u64) u64 {
 
 test "admission reserves rejection capacity and recovers after overload" {
     var admission: Admission = undefined;
-    admission.init(.{ .max_active = 1, .max_rejecting = 1, .rejections_per_second = 1 }, 0);
+    admission.init(.{
+        .max_active = 1,
+        .max_rejecting = 1,
+        .rejections_per_second = 1,
+    }, 0);
     try std.testing.expectEqual(.admit, admission.acquire(0, false));
     try std.testing.expectEqual(.reject, admission.acquire(0, false));
     try std.testing.expectEqual(.close, admission.acquire(0, false));
@@ -172,7 +193,10 @@ test "refill matches exact credit across rates capacities and clock boundaries" 
             const credit = @as(u128, elapsed) * rate;
             admission.refill(elapsed);
             const expected_tokens: u64 = @intCast(@min(capacity, balance + credit));
-            const expected_rejections: u64 = @intCast(@min(rejection_capacity, rejection_capacity / 2 + credit));
+            const expected_rejections: u64 = @intCast(@min(
+                rejection_capacity,
+                rejection_capacity / 2 + credit,
+            ));
             try testing.expectEqual(expected_tokens, admission.tokens);
             try testing.expectEqual(expected_rejections, admission.rejection_tokens);
             const tokens = admission.tokens;

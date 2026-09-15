@@ -1,0 +1,80 @@
+<section id="http2-lan-results">
+  <div class="section-head"><h2>HTTP/2 · remote client</h2><p>September 14, 2026 · @@HTTP2_LAN_STATS@@</p></div>
+  <p class="finding"><strong>These clients ran on <code>client.example</code>, a separate physical machine.</strong>
+    The Ryzen 7 8745HS load host connects over the wired 2.5 Gb/s LAN to the Ryzen AI Max+ 395 server.
+    Every connection uses four concurrent stream slots. SSH carries control and evidence;
+    request traffic goes directly over the LAN.</p>
+  <p>TLS 1.3 <code>GET /</code>, a verified six-byte response, 64 / 1,024 / 8,192 / 16,384 requested connections,
+    and equal server CPU budgets. Rates and successful-response p99 are medians of three eight-second
+    issuing windows after two seconds of warmup. Rates include the time needed to drain in-flight requests.
+    Failure counts total all three trials; failed requests are retained.</p>
+  <p><strong>Bun source review:</strong> the benchmarked Bun uses its own Rust HTTP/2 engine and ls-hpack.
+    <a href="#bun-http2-review">Ranked strategies and poor fits</a> ·
+    <a href="#bun-http2-implementation">Implementation trials and retain/revert decisions →</a></p>
+  <p class="finding"><strong>Client placement changes the ranking.</strong> @@HTTP2_LAN_CALIBRATION@@
+    <a href="#note-http2-lan-calibration">Supplemental calibration and evidence →</a></p>
+  <p class="review-note"><strong>† means a partial connection population.</strong>
+    ZHTPS has a limit of 8,176 connections per worker: one worker cannot reach 8,192 or 16,384,
+    and two workers cannot reach 16,384. Other setup failures can also reduce the population.
+    Flagged rates describe the achieved load; they are not comparisons at the full requested concurrency.
+    Ready counts show the observed range across trials.</p>
+  <h3>One constrained worker · all four servers</h3>
+  <div class="table-scroll ledger" tabindex="0" role="region" aria-label="Remote HTTP/2 one-worker measurements">
+    <table><caption>Median verified responses/s · successful p99 · total measured failures across three trials</caption>
+      <thead><tr><th scope="col">Requested connections × streams</th><th scope="col">ZHTPS</th>
+        <th scope="col">Go</th><th scope="col">Node</th><th scope="col">Bun</th></tr></thead>
+      <tbody>@@HTTP2_LAN_SINGLE@@</tbody></table>
+  </div>
+  <h3>Multiple workers · ZHTPS and Go</h3>
+  <div class="table-scroll ledger" tabindex="0" role="region" aria-label="Remote HTTP/2 multi-worker measurements">
+    <table><caption>Equal server CPU budgets · Node and Bun appear only in the one-worker comparison</caption>
+      <thead><tr><th scope="col">Workers / CPUs</th><th scope="col">Requested connections × streams</th>
+        <th scope="col">ZHTPS</th><th scope="col">Go</th></tr></thead>
+      <tbody>@@HTTP2_LAN_MULTI@@</tbody></table>
+  </div>
+  <p class="explainer">These rates include the client and LAN limits. Server affinity constrains process
+    threads and excludes some host packet-processing work. Successful-response p99 excludes failures,
+    so read it together with the failure counts. There are no transparent HTTP retries or replacement connections.</p>
+  <div class="explorer" id="http2-lan-chart-panel" hidden>
+    <h3>Explore remote measurements</h3>
+    <div class="filter-bar chart-controls">
+      <div><label for="http2-lan-workers">Server workers / CPU budget</label><select id="http2-lan-workers">
+        <option value="1">1 · ZHTPS, Go, Node and Bun</option><option value="2">2 · ZHTPS and Go</option>
+        <option value="4">4 · ZHTPS and Go</option><option value="8">8 · ZHTPS and Go</option></select></div>
+      <div><label for="http2-lan-metric">Metric</label><select id="http2-lan-metric">
+        <option value="requests_per_second">Verified responses/s · median</option>
+        <option value="p99_ms">Successful-response p99 · median</option>
+        <option value="measurement_failed">Measured failures · total</option>
+        <option value="setup_failed">Setup failures · total</option>
+        <option value="warmup_failed">Warmup failures · total</option></select></div>
+    </div>
+    <p id="http2-lan-chart-caption" class="explainer"></p>
+    <div id="http2-lan-chart" class="comparison-chart" aria-live="polite"></div>
+  </div>
+  <h3 id="http2-lan-failures">Failure accounting</h3>
+  <p class="finding"><strong>ZHTPS follow-up: substantial NIC receive loss, mainly on the remote client.</strong>
+    Rapid sampling recorded 1.71 million client receive misses in one diagnostic interval.
+    The same binaries completed three 16,384-connection loopback controls with zero failures.
+    <a href="#http2-diagnosis">Paired TCP evidence, NIC samples, controls and limits →</a></p>
+  <p>All failed operations are preserved individually, including before measurement. Totals below cover
+    each server's entire matrix; Node and Bun have fewer trials. Use the workload detail to compare like workloads.</p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Remote HTTP/2 failure totals">
+    <table><caption>Total recorded failures by server and phase</caption>
+      <thead><tr><th scope="col">Server</th><th scope="col">Trials</th><th scope="col">Setup</th>
+        <th scope="col">Holding</th><th scope="col">Warmup</th><th scope="col">Measurement</th></tr></thead>
+      <tbody>@@HTTP2_LAN_TOTALS@@</tbody></table>
+  </div>
+  <details class="archive"><summary>Failure counts and ready connections for all 40 server/workload groups</summary>
+    <div class="archive-body"><p>Counts total three trials. Ready is the minimum–maximum at measurement start.
+      Setup includes TCP, TLS, and one validated GET; holding GETs keep early connections alive until the
+      shared warmup barrier. Unattempted connections are separate from failures.</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Remote HTTP/2 failures by workload">
+        <table><thead><tr><th scope="col">CPUs</th><th scope="col">Requested connections</th><th scope="col">Server</th>
+          <th scope="col">Ready range</th><th scope="col">Setup failures</th><th scope="col">Holding failures</th>
+          <th scope="col">Warmup failures</th><th scope="col">Measured failures</th><th scope="col">Unattempted</th></tr></thead>
+          <tbody>@@HTTP2_LAN_FAILURES@@</tbody></table>
+      </div>
+    </div>
+  </details>
+  <p><a href="#http2-lan">Full remote report, individual failure logs, ranges, audit and reproduction commands →</a></p>
+</section>

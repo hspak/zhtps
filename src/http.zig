@@ -16,6 +16,7 @@ pub const Header = struct {
 pub const Version = enum {
     http_1_0,
     http_1_1,
+    http_2,
 };
 
 test {

@@ -58,7 +58,7 @@ test "prometheus metrics expose status counts and cumulative latency buckets" {
     metrics.observe(.request_duration_seconds, 11_000);
     const snapshot = metrics.snapshot();
     var buffer: [16 * 1024]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
+    var writer: std.Io.Writer = .fixed(&buffer);
     try write(&snapshot, &writer);
     const output = writer.buffered();
     for ([_][]const u8{
@@ -71,7 +71,11 @@ test "prometheus metrics expose status counts and cumulative latency buckets" {
         "zhtps_request_duration_seconds_count 2\n",
         "zhtps_request_duration_seconds_sum 0.000021\n",
     }) |expected| {
-        try testing.expect(std.mem.indexOf(u8, output, expected) != null);
+        try testing.expect(std.mem.indexOf(
+            u8,
+            output,
+            expected,
+        ) != null);
     }
 
     metrics.observe(.request_duration_seconds, 2_000_000_000);
@@ -83,6 +87,10 @@ test "prometheus metrics expose status counts and cumulative latency buckets" {
         "zhtps_request_duration_seconds_bucket{le=\"+Inf\"} 3\n",
         "zhtps_request_duration_seconds_count 3\n",
     }) |expected| {
-        try testing.expect(std.mem.indexOf(u8, writer.buffered(), expected) != null);
+        try testing.expect(std.mem.indexOf(
+            u8,
+            writer.buffered(),
+            expected,
+        ) != null);
     }
 }

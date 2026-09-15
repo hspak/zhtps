@@ -15,8 +15,16 @@ pub fn parse(bytes: []const u8, now: u64) ?i64 {
     var weekday: zeit.Weekday = undefined;
     var time: zeit.Time = undefined;
     if (bytes.len == 29 and bytes[3] == ',') {
-        if (!std.mem.eql(u8, bytes[3..5], ", ") or bytes[7] != ' ' or
-            bytes[11] != ' ' or bytes[16] != ' ' or !std.mem.eql(u8, bytes[25..], " GMT")) return null;
+        if (!std.mem.eql(
+            u8,
+            bytes[3..5],
+            ", ",
+        ) or bytes[7] != ' ' or
+            bytes[11] != ' ' or bytes[16] != ' ' or !std.mem.eql(
+            u8,
+            bytes[25..],
+            " GMT",
+        )) return null;
         weekday = parseWeekday(bytes[0..3], false) orelse return null;
         day = number(bytes[5..7]) orelse return null;
         month = parseMonth(bytes[8..11]) orelse return null;
@@ -30,11 +38,19 @@ pub fn parse(bytes: []const u8, now: u64) ?i64 {
         year = number(bytes[20..24]) orelse return null;
         time = parseTime(bytes[11..19]) orelse return null;
     } else {
-        const comma = std.mem.indexOfScalar(u8, bytes, ',') orelse return null;
+        const comma = std.mem.indexOfScalar(
+            u8,
+            bytes,
+            ',',
+        ) orelse return null;
         weekday = parseWeekday(bytes[0..comma], true) orelse return null;
         const rest = bytes[comma..];
         if (rest.len != 24 or rest[1] != ' ' or rest[4] != '-' or rest[8] != '-' or
-            rest[11] != ' ' or !std.mem.eql(u8, rest[20..], " GMT")) return null;
+            rest[11] != ' ' or !std.mem.eql(
+            u8,
+            rest[20..],
+            " GMT",
+        )) return null;
         day = number(rest[2..4]) orelse return null;
         month = parseMonth(rest[5..8]) orelse return null;
         const short_year = number(rest[9..11]) orelse return null;
@@ -61,32 +77,52 @@ pub fn parse(bytes: []const u8, now: u64) ?i64 {
             current.minute,
             current.second,
         };
-        if (std.mem.order(u16, &candidate, &cutoff) == .gt) year -= 100;
+        if (std.mem.order(
+            u16,
+            &candidate,
+            &cutoff,
+        ) == .gt) year -= 100;
     }
     if (year < 1601 or year > 9999 or day < 1 or day > month.lastDay(year)) return null;
     time.year = year;
     time.month = month;
     time.day = @intCast(day);
-    const days = zeit.daysFromCivil(.{ .year = year, .month = month, .day = time.day });
+    const days = zeit.daysFromCivil(.{
+        .year = year,
+        .month = month,
+        .day = time.day,
+    });
     if (zeit.weekdayFromDays(days) != weekday) return null;
     return time.instant().unixTimestamp();
 }
 
 fn number(bytes: []const u8) ?u16 {
     for (bytes) |byte| if (!std.ascii.isDigit(byte)) return null;
-    return std.fmt.parseInt(u16, bytes, 10) catch null;
+    return std.fmt.parseInt(
+        u16,
+        bytes,
+        10,
+    ) catch null;
 }
 
 fn parseMonth(bytes: []const u8) ?zeit.Month {
     inline for (std.meta.tags(zeit.Month)) |month| {
-        if (std.mem.eql(u8, month.shortName(), bytes)) return month;
+        if (std.mem.eql(
+            u8,
+            month.shortName(),
+            bytes,
+        )) return month;
     }
     return null;
 }
 
 fn parseWeekday(bytes: []const u8, long: bool) ?zeit.Weekday {
     inline for (std.meta.tags(zeit.Weekday)) |weekday| {
-        if (std.mem.eql(u8, if (long) weekday.name() else weekday.shortName(), bytes)) return weekday;
+        if (std.mem.eql(
+            u8,
+            if (long) weekday.name() else weekday.shortName(),
+            bytes,
+        )) return weekday;
     }
     return null;
 }
@@ -97,7 +133,11 @@ fn parseTime(bytes: []const u8) ?zeit.Time {
     const minute = number(bytes[3..5]) orelse return null;
     const second = number(bytes[6..8]) orelse return null;
     if (hour > 23 or minute > 59 or second > 60) return null;
-    return .{ .hour = @intCast(hour), .minute = @intCast(minute), .second = @intCast(second) };
+    return .{
+        .hour = @intCast(hour),
+        .minute = @intCast(minute),
+        .second = @intCast(second),
+    };
 }
 
 test "HTTP dates accept three formats and reject invalid calendar values" {
@@ -122,14 +162,23 @@ test "HTTP dates accept three formats and reject invalid calendar values" {
 }
 
 test "RFC 850 rolls future years into the preceding century" {
-    try std.testing.expectEqual(@as(?i64, 315532800), parse("Tuesday, 01-Jan-80 00:00:00 GMT", 1789096284));
+    try std.testing.expectEqual(
+        @as(?i64, 315532800),
+        parse("Tuesday, 01-Jan-80 00:00:00 GMT", 1789096284),
+    );
     // In 2040, that same suffix instead denotes 2080, whose weekday is Monday.
-    try std.testing.expectEqual(@as(?i64, 3471292800), parse("Monday, 01-Jan-80 00:00:00 GMT", 2208988800));
+    try std.testing.expectEqual(
+        @as(?i64, 3471292800),
+        parse("Monday, 01-Jan-80 00:00:00 GMT", 2208988800),
+    );
 }
 
 test "RFC 850 selects the century before validating leap days" {
     const testing = std.testing;
-    try testing.expectEqual(@as(?i64, 951782400), parse("Tuesday, 29-Feb-00 00:00:00 GMT", 2524608000));
+    try testing.expectEqual(
+        @as(?i64, 951782400),
+        parse("Tuesday, 29-Feb-00 00:00:00 GMT", 2524608000),
+    );
     try testing.expectEqual(@as(?i64, null), parse("Tuesday, 29-Feb-00 00:00:00 GMT", 2556144000));
     try testing.expectEqual(@as(?i64, null), parse("Tuesday, 30-Feb-00 00:00:00 GMT", 2524608000));
 }

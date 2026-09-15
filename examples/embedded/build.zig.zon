@@ -1,0 +1,16 @@
+.{
+    .name = .zhtps_embedding,
+    .version = "0.0.0",
+    .fingerprint = 0xd68e0a9358cb2bad,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zhtps = .{ .path = "../.." },
+    },
+    .paths = .{
+        ".gitignore",
+        "build.zig",
+        "build.zig.zon",
+        "main.zig",
+        "endpoints.zig",
+    },
+}

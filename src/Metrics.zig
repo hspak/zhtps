@@ -1,9 +1,9 @@
 //! Fixed-cardinality atomic metrics with allocation-free, format-neutral snapshots.
 
 const std = @import("std");
+const Atomic = std.atomic.Value(u64);
 const log = std.log.scoped(.metrics);
 const Metrics = @This();
-const Atomic = std.atomic.Value(u64);
 
 counters: [std.meta.fields(Counter).len]Atomic = @splat(.init(0)),
 gauges: [std.meta.fields(Gauge).len]Atomic = @splat(.init(0)),
@@ -14,6 +14,12 @@ pub const Counter = enum {
     connections_closed_total,
     connections_refused_total,
     connections_idle_closed_total,
+    connections_reclaimed_total,
+    connection_reclaim_timeouts_total,
+    tls_handshakes_total,
+    tls_sessions_reused_total,
+    tls_errors_total,
+    tls_handshake_timeouts_total,
     requests_total,
     requests_admitted_total,
     requests_rejected_total,
@@ -33,6 +39,15 @@ pub const Counter = enum {
     io_submissions_total,
     io_completions_total,
     io_errors_total,
+    response_batches_total,
+    responses_batched_total,
+    response_batch_fallbacks_total,
+    buffer_allocations_total,
+    buffer_exhaustions_total,
+    connection_buffer_allocations_total,
+    connection_buffer_exhaustions_total,
+    request_storage_allocations_total,
+    request_storage_exhaustions_total,
     log_events_total,
     log_dropped_total,
     log_write_errors_total,
@@ -50,6 +65,15 @@ pub const Gauge = enum {
     rejections_active,
     io_pending,
     log_pending,
+    buffer_bytes_active,
+    buffer_bytes_cached,
+    connection_buffer_bytes_active,
+    connection_buffer_bytes_cached,
+    request_storage_active,
+    request_storage_cached,
+    http2_streams_active,
+    http2_streams_cached,
+    http2_bytes_allocated,
     draining,
 };
 
@@ -96,10 +120,12 @@ pub const Snapshot = struct {
         sum_ns: u64 = 0,
     };
 
+    /// Returns the captured count, independent of subsequent recorder updates.
     pub fn counter(captured: *const Snapshot, id: Counter) u64 {
         return captured.counters[@intFromEnum(id)];
     }
 
+    /// Returns the captured occupancy, independent of subsequent recorder updates.
     pub fn gauge(captured: *const Snapshot, id: Gauge) u64 {
         return captured.gauges[@intFromEnum(id)];
     }
@@ -130,13 +156,30 @@ pub const Recorder = struct {
     metrics: *Metrics,
 
     /// All updates must run on the recorder's owning thread; snapshot readers may run concurrently.
-    pub fn add(owned: Recorder, counter: Counter, amount: u64) void {
-        increment(&owned.metrics.counters[@intFromEnum(counter)], amount, false);
+    pub fn add(
+        owned: Recorder,
+        counter: Counter,
+        amount: u64,
+    ) void {
+        increment(
+            &owned.metrics.counters[@intFromEnum(counter)],
+            amount,
+            false,
+        );
     }
 
     /// All updates must run on the recorder's owning thread; snapshot readers may run concurrently.
-    pub fn observe(owned: Recorder, histogram: Histogram, nanoseconds: u64) void {
-        record(owned.metrics, histogram, nanoseconds, false);
+    pub fn observe(
+        owned: Recorder,
+        histogram: Histogram,
+        nanoseconds: u64,
+    ) void {
+        record(
+            owned.metrics,
+            histogram,
+            nanoseconds,
+            false,
+        );
     }
 
     /// All updates must run on the recorder's owning thread; snapshot readers may run concurrently.
@@ -152,36 +195,79 @@ pub fn recorder(metrics: *Metrics) Recorder {
     return .{ .metrics = metrics };
 }
 
-fn increment(destination: *Atomic, amount: u64, comptime concurrent: bool) void {
-    if (concurrent) {
+fn increment(
+    destination: *Atomic,
+    amount: u64,
+    comptime concurrent: bool,
+) void {
+    if (comptime concurrent) {
         _ = destination.fetchAdd(amount, .monotonic);
     } else destination.store(destination.load(.monotonic) +% amount, .monotonic);
 }
 
-pub fn add(metrics: *Metrics, counter: Counter, amount: u64) void {
-    increment(&metrics.counters[@intFromEnum(counter)], amount, true);
+/// Atomically adds a count, wrapping on overflow. Supports concurrent writers.
+pub fn add(
+    metrics: *Metrics,
+    counter: Counter,
+    amount: u64,
+) void {
+    increment(
+        &metrics.counters[@intFromEnum(counter)],
+        amount,
+        true,
+    );
 }
 
+/// Reads the current count atomically without synchronizing unrelated memory.
 pub fn get(metrics: *const Metrics, counter: Counter) u64 {
     return metrics.counters[@intFromEnum(counter)].load(.monotonic);
 }
 
-pub fn set(metrics: *Metrics, gauge: Gauge, amount: u64) void {
+/// Publishes a gauge atomically. Concurrent writers replace, rather than combine, values.
+pub fn set(
+    metrics: *Metrics,
+    gauge: Gauge,
+    amount: u64,
+) void {
     metrics.gauges[@intFromEnum(gauge)].store(amount, .monotonic);
 }
 
-pub fn observe(metrics: *Metrics, histogram: Histogram, nanoseconds: u64) void {
-    record(metrics, histogram, nanoseconds, true);
+/// Atomically records a duration and its bucket; snapshots may see the two updates separately.
+pub fn observe(
+    metrics: *Metrics,
+    histogram: Histogram,
+    nanoseconds: u64,
+) void {
+    record(
+        metrics,
+        histogram,
+        nanoseconds,
+        true,
+    );
 }
 
-fn record(metrics: *Metrics, histogram: Histogram, nanoseconds: u64, comptime concurrent: bool) void {
+fn record(
+    metrics: *Metrics,
+    histogram: Histogram,
+    nanoseconds: u64,
+    comptime concurrent: bool,
+) void {
     const distribution = &metrics.latency[@intFromEnum(histogram)];
     var bucket: usize = 0;
     while (bucket < bounds_ns.len and nanoseconds > bounds_ns[bucket]) : (bucket += 1) {}
-    increment(&distribution.buckets[bucket], 1, concurrent);
-    increment(&distribution.sum_ns, nanoseconds, concurrent);
+    increment(
+        &distribution.buckets[bucket],
+        1,
+        concurrent,
+    );
+    increment(
+        &distribution.sum_ns,
+        nanoseconds,
+        concurrent,
+    );
 }
 
+/// Records one response in its status class. Assumes status is between 100 and 599.
 pub fn response(metrics: *Metrics, status: u16) void {
     metrics.add(statusCounter(status), 1);
 }
@@ -193,7 +279,7 @@ fn statusCounter(status: u16) Counter {
         3 => .responses_3xx_total,
         4 => .responses_4xx_total,
         5 => .responses_5xx_total,
-        else => unreachable,
+        else => unreachable, // Response status must belong to an HTTP status class.
     };
 }
 
@@ -242,29 +328,39 @@ test "metrics snapshot owns counters gauges and noncumulative distributions" {
     try testing.expectEqual(@as(u64, 4), captured.gauge(.connections_active));
     try testing.expectEqual(@as(u64, 0), captured.gauge(.draining));
     const distribution = captured.histogram(.request_duration_seconds);
-    try testing.expectEqualSlices(u64, &.{
-        1,
-        1,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        1,
-        1,
-    }, &distribution.buckets);
+    try testing.expectEqualSlices(
+        u64,
+        &.{
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+        },
+        &distribution.buckets,
+    );
     try testing.expectEqual(@as(u64, 2_000_021_001), distribution.sum_ns);
-    try testing.expectEqual(@as(u64, 1), captured.histogram(.event_loop_duration_seconds).buckets[0]);
+    try testing.expectEqual(
+        @as(u64, 1),
+        captured.histogram(.event_loop_duration_seconds).buckets[0],
+    );
     try testing.expectEqual(@as(u64, 0), captured.histogram(.admitted_duration_seconds).sum_ns);
 
     const latest = metrics.snapshot();
     try testing.expectEqual(@as(u64, 6), latest.counter(.requests_admitted_total));
     try testing.expectEqual(@as(u64, 0), latest.gauge(.connections_active));
     try testing.expectEqual(@as(u64, 2), latest.histogram(.request_duration_seconds).buckets[0]);
-    try testing.expectEqual(@as(u64, 2_000_031_001), latest.histogram(.request_duration_seconds).sum_ns);
+    try testing.expectEqual(
+        @as(u64, 2_000_031_001),
+        latest.histogram(.request_duration_seconds).sum_ns,
+    );
 }
 
 test "merged worker snapshots sum observations and preserve draining as a flag" {
@@ -295,7 +391,7 @@ test "merged worker snapshots sum observations and preserve draining as a flag" 
 
 test "single writer recorder permits concurrent snapshot readers" {
     const testing = std.testing;
-    const Producer = struct {
+    const producer = struct {
         fn run(metrics: *Metrics, done: *std.atomic.Value(bool)) void {
             const owned = metrics.recorder();
             for (0..10_000) |_| {
@@ -308,7 +404,11 @@ test "single writer recorder permits concurrent snapshot readers" {
     };
     var metrics: Metrics = .{};
     var done: std.atomic.Value(bool) = .init(false);
-    const thread = try std.Thread.spawn(.{}, Producer.run, .{ &metrics, &done });
+    const thread = try std.Thread.spawn(
+        .{},
+        producer.run,
+        .{ &metrics, &done },
+    );
     defer thread.join();
     var previous: u64 = 0;
     while (!done.load(.acquire)) {
@@ -320,6 +420,12 @@ test "single writer recorder permits concurrent snapshot readers" {
     const captured = metrics.snapshot();
     try testing.expectEqual(@as(u64, 10_000), captured.counter(.requests_admitted_total));
     try testing.expectEqual(@as(u64, 10_000), captured.counter(.responses_2xx_total));
-    try testing.expectEqual(@as(u64, 10_000), captured.histogram(.request_duration_seconds).buckets[0]);
-    try testing.expectEqual(@as(u64, 100_000_000), captured.histogram(.request_duration_seconds).sum_ns);
+    try testing.expectEqual(
+        @as(u64, 10_000),
+        captured.histogram(.request_duration_seconds).buckets[0],
+    );
+    try testing.expectEqual(
+        @as(u64, 100_000_000),
+        captured.histogram(.request_duration_seconds).sum_ns,
+    );
 }

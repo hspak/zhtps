@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "description": "Recorded run setup and summarized results; historical paths identify original artifacts.",
+  "raw_measurements_retained": false,
+  "records": {
+    "docs/nic-placement/manifest.json": {
+      "original_sha256": "40cf18bef93628f5cd2657791efca3a89fb626fa0aaa06719e6655caff363b8d",
+      "omitted_fields": {},
+      "record": {
+        "src/Config.zig": "a91861551a16e357bda6b576bebd71dd195dd318c382f4fc6ddf85f6099286f5",
+        "src/main.zig": "a5cf13d4b42b7808932bca5cff3483fa7bacb0da26e59216f382678a5baef02c",
+        "src/platform.zig": "0dd676678a99c54e9eb0ef7b2da9172df61ce70f79b8c1a835b83441317fef42",
+        "src/server.zig": "262544c824e6143ab8414fa4e2a201ebd391d78ae0cfc38218065fc7bc12bfb0",
+        "src/server/worker.zig": "ba97d4951398e534ec5823208185d1e79f4163ad7ded0b52581416035aa719d1",
+        "build.zig": "4e262cd3bac32d9ebcc665fb164328728189bea7aba83151fa09589202257454",
+        "deploy/worker_cpus.py": "eb5fdf67ac180c1de1ad4858ba99a6eb56a156e79de91c5e7eb6ce926b46a857",
+        "tests/worker_placement.py": "acd1b2c19b5308aafc5c2c768e458659bde9965926f599431f2022d076163bcc",
+        "tests/nic_placement.py": "f85deafc717e2249b079b891f9c58bd5ad18601de2564f9091f2e396e852a984",
+        "tests/kernel_work.py": "39b29c179681d9eff5e3e6fdad47a21e0bfc81e27f7dd7020538486de5295d1e",
+        "examples/embedded/main.zig": "724e316df61c4a4383d98e75feb4fd8a0d2440efa8bed332bb5607be08d2a895"
+      }
+    },
+    "docs/nic-placement/smoke.json": {
+      "original_sha256": "b2af5a9b9ec33289fe88e632f43a7c4b2156bc34ea6fdc2b70d52da930a2b5e5",
+      "omitted_fields": {},
+      "record": {
+        "plan": {
+          "interface": "server_eth0",
+          "irq_affinity": {
+            "103": [
+              24
+            ]
+          },
+          "excluded_irq_siblings": [
+            8,
+            24
+          ],
+          "allowed_online_cpus": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ],
+          "worker_cpus": [
+            9
+          ],
+          "arguments": [
+            "--workers",
+            "1",
+            "--worker-cpus",
+            "9"
+          ]
+        },
+        "workers": [
+          {
+            "id": 0,
+            "thread": 324596,
+            "cpu": 9,
+            "sq_entries": 256,
+            "cq_entries": 2048,
+            "connection_capacity": 256,
+            "connections_active": 1,
+            "requests_active": 0,
+            "requests_admitted_total": 1,
+            "requests_rejected_total": 0,
+            "requests_completed_total": 1
+          }
+        ],
+        "actual_affinities": [
+          [
+            9
+          ]
+        ],
+        "http_status": 200,
+        "response_body": "ZHTPS\n",
+        "server_exit": 0,
+        "binary_sha256": "babf9beed861903f4a604414f105c30e3db3c996f57f00eba06251355620668f"
+      }
+    },
+    "docs/nic-placement/topology.json": {
+      "original_sha256": "86f078bfbd9f6f1c748036740627b3db5cc03dd6f8cb12aa48810c1297d6e034",
+      "omitted_fields": {},
+      "record": {
+        "interface": "server_eth0",
+        "irq_affinity": {
+          "103": [
+            24
+          ]
+        },
+        "excluded_irq_siblings": [
+          8,
+          24
+        ],
+        "allowed_online_cpus": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "worker_cpus": [
+          9
+        ],
+        "arguments": [
+          "--workers",
+          "1",
+          "--worker-cpus",
+          "9"
+        ]
+      }
+    }
+  }
+}

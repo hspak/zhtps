@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "description": "Recorded run setup and summarized results; historical paths identify original artifacts.",
+  "raw_measurements_retained": false,
+  "records": {
+    "docs/performance-strategies-review/source-hashes.json": {
+      "original_sha256": "98f63fc6f6635dcd0d9f35dc26b2aa8e0fda6fa0fbb7aa665112bfee1455cfc5",
+      "omitted_fields": {},
+      "record": {
+        "build.zig": "8126928046f631bee25209c1af8ff9b8010c7bc170efd78a158c6ec8a2e67751",
+        "build.zig.zon": "3489e5327e8bcf2695d43cb2667aa6b7e4a98f13b077b16187dd1ad84c941beb",
+        ".gitignore": "155d221ca6d5c18df9806c4526f3a39fc54329897c38a1d44cb2aaf6c4a3a4ee",
+        "src/http.zig": "64d6291fedb90ff50f019db9e4803bfada2e15216f4145f8187b1d0665542037",
+        "src/application.zig": "edfaca6a8b947581f0aa88d54b65c224f3b438758610151c35594776f3b4ce7b",
+        "src/Logger.zig": "6540e5b0a84b1c0b28536b26306b022ebbcede0249c9ca447f4301a98069d03d",
+        "src/Tls.zig": "5f4b2d1392ad4e3a2fe90825eb7ad97b95c288dc1f9f7e7ccd30058befec2132",
+        "src/metrics_format.zig": "37f097bcd99ca0cf676c19ac5e2ec31a7f74b952131d7dd271261a0047ffe9c5",
+        "src/main.zig": "f795304b748fd41481c1c9116a2ba3481ec214b864002118ef1af859c147d615",
+        "src/Config.zig": "2e957395880a39f4d76813f1e612db5114801853334351069174b41ed6ed582a",
+        "src/Admission.zig": "60e1c8785db097463f338da5d309c302505ac26b2ce03351a676fb131e2353e5",
+        "src/Metrics.zig": "41ca6bd1ffa4ccc33dcca7a835e4c27a62a26b35034c0fba245198e5f7c2c3a6",
+        "src/tls_openssl.h": "28c1d28c1e61faf0fcb301a0810a1b794a0dd08d5bb7cdd79bb50290854d8267",
+        "src/platform.zig": "47f0ad1ec9aa34fb9d0072a86d3487351b6be5b8cf869220e87e30d44acc8b88",
+        "src/root.zig": "3a96660b6122a50359782826bfbe2ffc8625184794e9ee02667714046e7049ce",
+        "src/server.zig": "c061b1ae7564d2838c2a6024ea117940b266e8b348cb2a303b4bc6abbef1ca8a",
+        "src/endpoint.zig": "aecb42335f37e03585b25218569fa579bb9e8cd3d8198cdee672eb2b0eaee5d4",
+        "src/server/BufferPool.zig": "0d199012977383bdf8133d137f935c660d6c50282628a663bcc7228cdecd5c90",
+        "src/server/ResponseBatch.zig": "2f56ad6c790c8692ff0fdf97583984411f8ad941ff4603485cba13df78d6b6ed",
+        "src/server/worker.zig": "3d37e6179ee09db863020fc6a9744204e5a1d6ae197cd9a1007a5a08324a04da",
+        "src/http/date.zig": "ba73e8141d8f044ba1cb9e71e99b9deef8f43405a55ed7652feb85b0c5435928",
+        "src/http/Response.zig": "a141fe774bf4d5f22a4e4d64309a95acf09b9385054c8922047b2f3ba38c095b",
+        "src/http/syntax.zig": "abad19517dc91499de44dc5466a34f0fd965adc0d7a1406263cdee2ca92878ca",
+        "src/http/Request.zig": "835c21c5796d54ef5376bb0e34c1660e12740c794302c295e75517709b24b0e6",
+        "src/http/conditions.zig": "d6bff31990f976498739663fcc823347ae87940caf8636f94a29cfa42c0af6c3",
+        "src/http/path.zig": "1892bae7d56a53ad86419cb12774d69030a0b2a5e7624f5205f0d2902fbe2c98",
+        "src/http/Parser.zig": "997c96b3582a674b7561ffd6767c372f81108d8132d40f084a6ee6233e7c6976",
+        "src/metrics_format/prometheus.zig": "38752cec115621624b606726bf5adfb261ff90b70367c62fcabd86591d66e426",
+        "src/metrics_format/json.zig": "cdcb1ec31088500e73679842a3082b2904c8762af4ecd76aea55d9bd9c84f161",
+        "src/application/Exchange.zig": "8f34af5408898e7c841e377eef96516197faed8664d670b05f307b348ef99fc8",
+        "src/endpoint/metrics.zig": "368bf3bc5ac911966226940d4d14354f6d67035bd2ee1e3638e9774d7ea58008",
+        "src/endpoint/Scratch.zig": "775817faf68892f2d7136e5ca543f57214cc4f1b46cb8d30b74717605ece30db",
+        "src/endpoint/json.zig": "ec97395a0e07ad3e2ef3ba652eb745b2e918cf915b611559c8ce98aacfe4cd6a",
+        "src/endpoint/routing.zig": "37a0813fd7aa331d42b93df30cc694920fe7afc76538e3936e0c3dd563eef342",
+        "src/endpoint/server.zig": "86c5f4890327f87042f3dc57dbfd6a57637c6dc95985f5acb8f6c135ed286e1f",
+        "tests/response_aggregation.py": "0f76dabe313bea771ae7be4328f5c8d45f595af86c3de045cf1d4464b7d6d19f",
+        "tests/nic_placement.py": "e169a30353e590775ff2d608f6e3572a60b75af1584ba4952501ad8215bd8313",
+        "tests/ingress_kernel.py": "3d538fdd596719072d69bd40c91b0132fb26036bc2f5766feb38452bda6893a5",
+        "tests/endpoint_declarations.zig": "d43e497fe9a77c4e20a2f14d1979215912892f80b92037166c88144b4b53ff88",
+        "tests/buffer_pools.py": "2e69b4fff06a8a746c7198566619ffa2561d6ca48c394b50e526798b27f70bd5",
+        "tests/remote_load.py": "03a3a6555976eda80dec427078e2193fe861ef729a1b1c13c0e4cceb70b6d21a",
+        "tests/idle_reclamation.py": "0d31271e87f06a3b6106525e07c6bba1d0cd49697357d7b455e6907204c18b1c",
+        "tests/tls.py": "9d3b7e3ee51909a5dc6adf751d5936180b4d066ba9479d27f7653ef3df393ab2",
+        "tests/ingress.py": "020f07a81d346045bfa77820068a6d5a8eb4f510e57ae098da9093eb2feb5a77",
+        "tests/application_executor.py": "2ea670f03316bb483cc4a3077541225be8748091d1f46fc6a342491facc2cbe2",
+        "tests/ingress_zhtps.py": "8065cd0e7d14dfe355c423e97848dbe09a647eb9648f78181d3a7eb73808cfe9",
+        "tests/sweep.py": "1bb9524a182765f5927cc244a369ef885786a4a2f8022c8efa0a20ebbb6835d7",
+        "tests/wire.py": "4693edc26fc14dcc7ed3e1de15e2ad746292a136804bff6dc7908f8ed0178869",
+        "tests/load.py": "6dfb2876829ae54a2f5adf9ae77d2612266d775d03d4e362521828abdf6048f3",
+        "tests/check_overload.py": "6bc1879f6c07ab308dd4539612fd13e083a626dceed23ff9aaf542cfa6551332",
+        "tests/tls_application.zig": "d89cb551a421a7de06ecf0230e6b3b8a6101c73d137de022521ae58d444695ec",
+        "tests/kernel_work.py": "39b29c179681d9eff5e3e6fdad47a21e0bfc81e27f7dd7020538486de5295d1e",
+        "tests/body_streaming.py": "0e4a9184a0302e14dd8fa1cda0b38660b4cb21455e56c774c2d1a8527f090512",
+        "tests/worker_placement.py": "acd1b2c19b5308aafc5c2c768e458659bde9965926f599431f2022d076163bcc",
+        "tests/deploy_security.py": "08174dee3d5717743c165a6bc93e65716e43d25bb1b628f39b1e99b3ef3b98ce",
+        "tests/shutdown.py": "404bbba0202352ff18e9693290d9c324203cf86130f8707ad6b9138d71d4003b",
+        "tests/request_storage.py": "6fbc9ed55491411949335d29d9c3e143ac83fc154b0cd155f463d8a114e26965",
+        "tests/overload_remote.py": "1d2dbd0bc20e0e89e0c729843821a34741e33acb97e6b6a3ea912e3a4bbb95f8",
+        "deploy/worker_cpus.py": "b182935d98a360ce1669546dcad894dc1762e1cd8313cbadf6dd5cada39fd7f5",
+        "deploy/connections.py": "4e684b17564dd2b05efdd3d68e42d760085e1761b944868c09700c9af6ffc518",
+        "deploy/ingress.py": "bded5136dad04818c5ae4525c43e2414856020662241ad810063c10b11a74c96",
+        "bench/Crc32.zig": "de93f7f60ba773aa3a6f5f81617dbe9cce1272315f302ebd078f196195aa9a99",
+        "bench/checksum_fast.zig": "160e1b9e7b75b42a43a74139eecb0704101a8e768875dfa30d7b042fad5d2f58",
+        "bench/application.zig": "0ba0f3865dc6147b0018b40c83029ad73c918dc83102a91c9de685ff72dfdddb",
+        "bench/hot_paths.zig": "9d9722c3cdddd038d61e898a7b1a3341dc8aeef7bc45895eecbcfcdbdd473463",
+        "bench/upload.zig": "79bd7d929360bb9ec90b5e05ab2d2b16681b9218b320ecde827b871b05f2cd0a",
+        "bench/checksum_cost.zig": "682dbf78cafd3fef848fdef638c75e30f3ec9451eb4a1487ccdb3d84695c5e80",
+        "examples/embedded/endpoints.zig": "1f6e430e23429b3a3f575edc02f58574ef5326d894d4d27f6c6098a7b618589f",
+        "examples/embedded/main.zig": "fcd2ef87077ac6be890d0a08c0f0bf49257e3b901e63731802088cba9399e6f4",
+        "examples/embedded/build.zig": "642dd98cac4fb4f5d01032e7697559e09214dae22e817a3a1247366e4f44d7af",
+        "examples/embedded/build.zig.zon": "4561149111d137ea9f8efe66af7d5758d8e63746866ad9a1fed215ffc709596c",
+        "docs/request-critical-path/measure.zig": "c733cd2df43317ffa7dbbcfeedc2629c777fa687923e4ff4967e5e928e800479"
+      }
+    },
+    "docs/performance-strategies-review/validation.json": {
+      "original_sha256": "6351aeccca01adb53959a93c1075e5489000192fdbf2b54cd589b082edeb39ab",
+      "omitted_fields": {},
+      "record": {
+        "review": "Performance strategy composition and two interaction regressions",
+        "recorded_at": "2026-09-14T04:26:00.636530+00:00",
+        "zig_version": "0.16.0",
+        "performance_scope": "Existing experiment evidence and current-source review; no new throughput claim.",
+        "validation": {
+          "cwd": "/tmp/zhtps-performance-review/verified",
+          "command": [
+            "zig",
+            "build",
+            "test",
+            "test-library",
+            "test-wire",
+            "test-application",
+            "test-upload",
+            "test-tls",
+            "test-crc",
+            "test-deploy",
+            "-Doptimize=ReleaseSafe",
+            "--global-cache-dir",
+            "./.zig-global-cache",
+            "--summary",
+            "all"
+          ],
+          "exit_code": 0,
+          "build_steps": {
+            "passed": 72,
+            "total": 72
+          },
+          "top_level_zig_tests": {
+            "passed": 98,
+            "total": 98
+          },
+          "python_tests": 154,
+          "embedded_consumer": "passed",
+          "source_hashes": "source-hashes.json",
+          "log": "release-safe.log",
+          "server_binary_sha256": "9bf798a07845b8f172e91ee882bdf6c76d6c101a8b5ba0aab932badfc05f8b34"
+        },
+        "regressions": {
+          "tests_unchanged_between_before_and_after": true,
+          "before_server": "/tmp/zhtps-performance-review/baseline/zig-out/bin/zhtps",
+          "before_server_sha256": "4837a0764ba4f2c662a644171a811b4cc29d8bd7b5fd5bc1bc1df91a337094e8",
+          "before_worker_sha256": "3e4c36631475fae211385cf6a6529460912d2dd377629a00ec558d000baf38ee",
+          "baseline_note": "Isolated copy with the saved pre-fix worker and surrounding source from baseline-copy time; subsequent unrelated edits are not part of either fix.",
+          "aggregation": {
+            "test": "ResponseAggregationTests.test_invalid_pipeline_head_preserves_preceding_responses_without_rejection_permits",
+            "file": "tests/response_aggregation.py",
+            "sha256": "0f76dabe313bea771ae7be4328f5c8d45f595af86c3de045cf1d4464b7d6d19f",
+            "before_exit_code": 1,
+            "before_failure": "Empty EOF with aggregation enabled; disabled control passed.",
+            "before_log": "aggregation-before.log",
+            "after": "Passed in full aggregation suite, release-safe.log"
+          },
+          "admission": {
+            "test": "BufferPoolTests.test_admission_rejection_does_not_borrow_body_buffers",
+            "file": "tests/buffer_pools.py",
+            "sha256": "2e69b4fff06a8a746c7198566619ffa2561d6ca48c394b50e526798b27f70bd5",
+            "before_exit_code": 1,
+            "before_failure": "Unexpected buffer allocation with available budget, and buffer exhaustion with zero budget.",
+            "before_log": "admission-before.log",
+            "after": "Passed in full buffer suite, release-safe.log"
+          }
+        },
+        "additional_checks": [
+          "git diff --check",
+          "zig fmt --check src/server/worker.zig",
+          "python3 -m py_compile tests/response_aggregation.py tests/buffer_pools.py"
+        ],
+        "concurrent_workspace_edits": {
+          "preserved": true,
+          "files_differing_from_verified_snapshot": [
+            "build.zig",
+            "src/server/worker.zig",
+            "src/http/Response.zig",
+            "src/http/Parser.zig",
+            "docs/request-critical-path/measure.zig"
+          ],
+          "note": "Final full suite uses a frozen snapshot because another task continued editing live sources. Later live changes are not covered by this receipt."
+        }
+      }
+    }
+  }
+}

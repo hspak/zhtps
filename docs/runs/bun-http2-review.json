@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "description": "Recorded run setup and summarized results; historical paths identify original artifacts.",
+  "raw_measurements_retained": false,
+  "records": {
+    "docs/bun-http2-review/provenance.json": {
+      "original_sha256": "d75bc26001574334f8e54d30507de8ce8d241ec12e3f859017d330dde427dd04",
+      "omitted_fields": {},
+      "record": {
+        "review_date": "2026-09-14",
+        "scope": "Source review only; no production changes or new benchmark results.",
+        "bun_checkout": "../bun",
+        "bun_commit": "ae7179126de54c4cd9496f784168671bb520e92a",
+        "bun_checkout_clean": true,
+        "benchmarked_bun_revision": "1.4.0+34cbb9a40",
+        "benchmarked_bun_commit": "34cbb9a40b4bd1bd767d134a7065e66c2432a676",
+        "native_http2_changes_after_benchmarked_revision": [
+          "92fc9f295b76fcea2a7e043520742b015f666a05 2026-09-12 deps: update libarchive, brotli, lsquic, libjpeg-turbo, sqlite and others (#42523)",
+          "5900a8d0c020a63eec84fab3363a41d20e850aea 2026-08-27 Bun.serve http2: reject the request bytes the HTTP/1 parser rejects (#40676)",
+          "c6f335ffbd693783a3fd807b9d36819b11ca1d56 2026-08-27 Bun.serve: HTTP/2 support via `http2: true` (#40137)"
+        ],
+        "zhtps_base_commit": "19d07be51f9041bb6290d40dc9b813f2bc891a51",
+        "zhtps_source": "Working tree with pre-existing HTTP/2 changes; file hashes identify reviewed contents.",
+        "source_files": {
+          "source/bun/LICENSE.txt": {
+            "original_path": "LICENSE.md",
+            "bytes": 5613,
+            "sha256": "b9caf52728691b4057e371232c221a132883198be2f3d2ddf92c90404c984b1a"
+          },
+          "source/bun/packages/bun-uws/LICENSE": {
+            "original_path": "packages/bun-uws/LICENSE",
+            "bytes": 11357,
+            "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+          },
+          "source/bun/src/js/node/http2.ts": {
+            "original_path": "src/js/node/http2.ts",
+            "bytes": 266303,
+            "sha256": "85d38062a0ad648411e9971395f8a831919509a964247d78965c184d42fd6e1f"
+          },
+          "source/bun/src/runtime/api/bun/h2_frame_parser.rs": {
+            "original_path": "src/runtime/api/bun/h2_frame_parser.rs",
+            "bytes": 343418,
+            "sha256": "6d5100287a93447205c5579920da02151081e672ef577c981a6fd884711a4d06"
+          },
+          "source/bun/src/runtime/api/bun/h2/connection.rs": {
+            "original_path": "src/runtime/api/bun/h2/connection.rs",
+            "bytes": 104794,
+            "sha256": "96a8648e132c4a22bba1387f65467cdaf722f3ae633b9e793a494db33698468d"
+          },
+          "source/bun/src/runtime/api/bun/h2/hpack.rs": {
+            "original_path": "src/runtime/api/bun/h2/hpack.rs",
+            "bytes": 3732,
+            "sha256": "56378b7f2611e45adf8903b9f4d28ec7c7becc4f4104c468ba0cac62cb253491"
+          },
+          "source/bun/src/http/lshpack.rs": {
+            "original_path": "src/http/lshpack.rs",
+            "bytes": 8910,
+            "sha256": "f1c956181f91ad61adf3b0b730a2d5702108ff16909ac00a222c2eb8fc7fdf34"
+          },
+          "source/bun/src/jsc/bindings/c-bindings.cpp": {
+            "original_path": "src/jsc/bindings/c-bindings.cpp",
+            "bytes": 36976,
+            "sha256": "13f82d5680624a4dbdeadebf511a9784422fff4343a9242a15278b25edab2107"
+          },
+          "source/bun/packages/bun-uws/src/Http2Context.h": {
+            "original_path": "packages/bun-uws/src/Http2Context.h",
+            "bytes": 88748,
+            "sha256": "0e3ebf10a72aec28da7a2f0878713c5363015e638706e56ce91c58220bee6394"
+          },
+          "source/bun/packages/bun-uws/src/Http2ResponseData.h": {
+            "original_path": "packages/bun-uws/src/Http2ResponseData.h",
+            "bytes": 2481,
+            "sha256": "6440af99626e4f1b70501f32b0e2fc3aa409480cac69219cad8aa3b79060a25e"
+          },
+          "source/bun-measured/src/js/node/http2.ts": {
+            "original_path": "src/js/node/http2.ts",
+            "bytes": 265247,
+            "sha256": "d9f8a2d659fbf80356b31dc94e415daf7bd79bc88d213c69987f93d92a4564da"
+          },
+          "source/bun-measured/src/runtime/api/bun/h2_frame_parser.rs": {
+            "original_path": "src/runtime/api/bun/h2_frame_parser.rs",
+            "bytes": 346210,
+            "sha256": "29c9fcbfcbc1695d75180c493b592de2e45e59ea78dccba816ac6fc93ccbd46f"
+          },
+          "source/zhtps/src/Config.zig": {
+            "original_path": "src/Config.zig",
+            "bytes": 23538,
+            "sha256": "a3a2dfb65974023a51c44f8633a2e02d21bb8bc4f17464e7c6789bf50c3b9c62"
+          },
+          "source/zhtps/src/Tls.zig": {
+            "original_path": "src/Tls.zig",
+            "bytes": 12938,
+            "sha256": "b15c26a782dcfec9f7eaf4cbcadc6291b660f600d56284ab973a800a12d7d5bb"
+          },
+          "source/zhtps/src/http2.zig": {
+            "original_path": "src/http2.zig",
+            "bytes": 28574,
+            "sha256": "a8d2e2a30a9f197e8039bd3551bc7bf47f70b57e44d06536f898470a4f28893c"
+          },
+          "source/zhtps/src/http/Response.zig": {
+            "original_path": "src/http/Response.zig",
+            "bytes": 14186,
+            "sha256": "26e0c978b4d694dfdf4c08d6afda32131503a7ba62491383c1a38f743942e737"
+          },
+          "source/zhtps/src/server/Http2Allocator.zig": {
+            "original_path": "src/server/Http2Allocator.zig",
+            "bytes": 1217,
+            "sha256": "713367f168e99aaff2b59437cfc890e0567d78675d65d7fec86e1630be8bd0e0"
+          },
+          "source/zhtps/src/server/http2.zig": {
+            "original_path": "src/server/http2.zig",
+            "bytes": 37479,
+            "sha256": "b7a5f43b3d57aeff3300493d4285a0152b66242147444bfac61b0dbfe218201c"
+          },
+          "source/zhtps/src/server/worker.zig": {
+            "original_path": "src/server/worker.zig",
+            "bytes": 222107,
+            "sha256": "c201995258c7571bbcbca1497480bf163f3c05fae0e054b03a4dbec07334c13d"
+          },
+          "source/zhtps/bench/http2_lan_server.cjs": {
+            "original_path": "bench/http2_lan_server.cjs",
+            "bytes": 1175,
+            "sha256": "2647b26c029a4b0cc9ad5ed9d12950582264699986311ab1f868ad12bd4498f8"
+          },
+          "source/zhtps/bench/compare_http2_lan.py": {
+            "original_path": "bench/compare_http2_lan.py",
+            "bytes": 19880,
+            "sha256": "d56272bff39fe28ad00aab0106705bde8778fa9974b96b9a13067bd308e829e6"
+          }
+        }
+      }
+    }
+  }
+}

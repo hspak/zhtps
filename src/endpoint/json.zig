@@ -21,7 +21,11 @@ pub fn checkDepth(bytes: []const u8) DepthError!void {
 /// unspecified; no partially serialized response should be sent.
 pub fn write(destination: []u8, value: anytype) WriteError![]const u8 {
     var output: Output = .{ .destination = destination };
-    std.json.Stringify.value(value, .{}, &output.writer) catch
+    std.json.Stringify.value(
+        value,
+        .{},
+        &output.writer,
+    ) catch
         return output.failure orelse error.OutOfMemory;
     return destination[0..output.used];
 }
@@ -30,7 +34,6 @@ const Nesting = struct {
     depth: usize = 0,
     in_string: bool = false,
     escaped: bool = false,
-
     fn consume(nesting: *Nesting, bytes: []const u8) DepthError!void {
         for (bytes) |byte| {
             if (nesting.in_string) {
@@ -60,12 +63,15 @@ const Output = struct {
     // No buffering: reject an opening delimiter before Stringify pushes its
     // fixed nesting stack. A buffered writer could defer this check too late.
     writer: Writer = .{ .vtable = &.{ .drain = drain }, .buffer = &.{} },
-    destination: []u8,
+    destination: []u8 = &.{},
     used: usize = 0,
     nesting: Nesting = .{},
     failure: ?WriteError = null,
-
-    fn drain(writer: *Writer, slices: []const []const u8, splat: usize) Writer.Error!usize {
+    fn drain(
+        writer: *Writer,
+        slices: []const []const u8,
+        splat: usize,
+    ) Writer.Error!usize {
         const output: *Output = @fieldParentPtr("writer", writer);
         const start = output.used;
         for (slices[0 .. slices.len - 1]) |bytes| try output.append(bytes);
@@ -117,10 +123,19 @@ test "JSON output bounds recursive values and preserves scalar formatting" {
     try std.testing.expectError(error.JsonTooDeep, write(&buffer, nodes[0]));
     nodes[0].next = &nodes[0];
     try std.testing.expectError(error.JsonTooDeep, write(&buffer, nodes[0]));
-    const values = .{ .text = "\\\"[{\n", .number = @as(i64, -42), .float = 1.25, .ok = true };
+    const values = .{
+        .text = "\\\"[{\n",
+        .number = @as(i64, -42),
+        .float = 1.25,
+        .ok = true,
+    };
     var expected: [256]u8 = undefined;
     var writer: Writer = .fixed(&expected);
-    try std.json.Stringify.value(values, .{}, &writer);
+    try std.json.Stringify.value(
+        values,
+        .{},
+        &writer,
+    );
     try std.testing.expectEqualStrings(writer.buffered(), try write(&buffer, values));
     try std.testing.expectError(error.OutOfMemory, write(buffer[0..1], values));
 }
@@ -145,6 +160,9 @@ test "JSON output bounds custom serializers including raw and repeated writes" {
     };
     var buffer: [4096]u8 = undefined;
     _ = try write(&buffer, Custom{ .depth = max_depth });
-    try std.testing.expectError(error.JsonTooDeep, write(&buffer, Custom{ .depth = max_depth + 1 }));
+    try std.testing.expectError(
+        error.JsonTooDeep,
+        write(&buffer, Custom{ .depth = max_depth + 1 }),
+    );
     try std.testing.expectError(error.JsonTooDeep, write(&buffer, Raw{}));
 }

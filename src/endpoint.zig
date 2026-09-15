@@ -11,11 +11,13 @@ const routing = @import("endpoint/routing.zig");
 const endpoint_server = @import("endpoint/server.zig");
 const Scratch = @import("endpoint/Scratch.zig");
 const bounded_json = @import("endpoint/json.zig");
+pub const ResponseStream = @import("endpoint/ResponseStream.zig");
 const log = std.log.scoped(.endpoint);
 
 /// Errors available to every endpoint. InvalidInput becomes a 400 response;
 /// allocation failures, excessive output depth and application errors become 500.
-pub const EndpointError = JsonError || InputError;
+/// Producer errors after response commitment abort that response instead.
+pub const EndpointError = JsonError || InputError || ResponseStream.Error || std.Io.Writer.Error;
 
 /// Response serialization exceeds scratch capacity or the JSON nesting limit.
 pub const JsonError = bounded_json.WriteError;
@@ -34,7 +36,7 @@ pub const Method = enum {
     patch,
     post,
     put,
-
+    /// Returns the uppercase wire spelling, borrowing static storage.
     pub fn text(method: Method) []const u8 {
         return switch (method) {
             .delete => "DELETE",
@@ -91,6 +93,7 @@ pub const Body = enum {
     none,
     bytes,
     json,
+    stream,
 };
 
 pub const Parameter = struct {
@@ -104,7 +107,7 @@ pub const Access = struct {
     string_storage: [512]u8 = undefined,
     string_used: usize = 0,
     dropped: usize = 0,
-
+    /// Discards all attributes and drop counts; invalidates slices returned by fields.
     pub fn reset(access: *Access) void {
         access.len = 0;
         access.string_used = 0;
@@ -113,10 +116,18 @@ pub const Access = struct {
 
     /// Sets copied metadata on the eventual request_complete record. Replaces
     /// existing names; an unsupported or oversized update preserves the old value.
-    pub fn put(access: *Access, comptime name: []const u8, value: anytype) void {
+    pub fn put(
+        access: *Access,
+        comptime name: []const u8,
+        value: anytype,
+    ) void {
         var next: Access = .{};
         for (access.fields()) |field| {
-            if (std.mem.eql(u8, field.name, name)) continue;
+            if (std.mem.eql(
+                u8,
+                field.name,
+                name,
+            )) continue;
             next.copyAttribute(field);
         }
         if (next.len == next.attributes.len) {
@@ -238,9 +249,26 @@ pub fn Call(comptime Api: type) type {
         pub const Specification = Api;
         pub const Services = if (@hasDecl(Api, "Services")) Api.Services else void;
         pub const Local = if (@hasDecl(Api, "Local")) Api.Local else struct {};
-        pub const MetricDefinition = if (@hasDecl(Api, "Metrics")) Api.Metrics else void;
+        // Retain the former declaration spelling for existing applications.
+        pub const MetricDefinition = if (@hasDecl(Api, "metrics"))
+            Api.metrics
+        else if (@hasDecl(Api, "Metrics"))
+            Api.Metrics
+        else
+            void;
         pub const Metrics = custom_metrics.Metrics(MetricDefinition);
         pub const HandlerError = HandlerErrors(Api);
+        /// Runs once on the route's application lane after response headers are
+        /// committed. May wait using call.io and cooperate with isCanceled().
+        /// Returning flushes and ends the body; errors abort the HTTP/1 connection
+        /// or HTTP/2 stream. Local and scratch remain valid through cleanup.
+        pub const Producer = *const fn (*Self, *ResponseStream) HandlerError!void;
+        pub const StreamOptions = struct {
+            status: Status = .ok,
+            headers: []const http.Header = &.{},
+            length: ?u64 = null,
+            close: bool = false,
+        };
 
         request: *const http.Request,
         body_bytes: []const u8,
@@ -256,6 +284,15 @@ pub fn Call(comptime Api: type) type {
         request_id: u64,
         route_name: []const u8,
         allowed_methods: []const u8,
+        cancellation: ?*const std.atomic.Value(bool) = null,
+        response_producer: *?Producer,
+
+        /// True after this request is canceled, its deadline expires, or its
+        /// connection closes. Hooks may cooperate by ending work promptly.
+        /// The pointer is borrowed only for the hook; null means unavailable.
+        pub fn isCanceled(call: *const Self) bool {
+            return if (call.cancellation) |flag| flag.load(.acquire) else false;
+        }
 
         /// Borrows the first matching header, ignoring name case; null means absent.
         pub fn header(call: *const Self, name: []const u8) ?[]const u8 {
@@ -265,16 +302,28 @@ pub fn Call(comptime Api: type) type {
         /// Borrows a named segment of the normalized path, or null when absent.
         pub fn param(call: *const Self, name: []const u8) ?[]const u8 {
             for (call.parameters) |item| {
-                if (std.mem.eql(u8, item.name, name)) return item.value;
+                if (std.mem.eql(
+                    u8,
+                    item.name,
+                    name,
+                )) return item.value;
             }
             return null;
         }
 
         /// Parses a required decimal parameter; missing, malformed or overflowing
         /// input returns InvalidInput.
-        pub fn paramInt(call: *const Self, comptime T: type, name: []const u8) InputError!T {
+        pub fn paramInt(
+            call: *const Self,
+            comptime T: type,
+            name: []const u8,
+        ) InputError!T {
             const value = call.param(name) orelse return error.InvalidInput;
-            return std.fmt.parseInt(T, value, 10) catch error.InvalidInput;
+            return std.fmt.parseInt(
+                T,
+                value,
+                10,
+            ) catch error.InvalidInput;
         }
 
         /// Returns the first matching form-encoded query value. Names and values
@@ -282,14 +331,26 @@ pub fn Call(comptime Api: type) type {
         /// or scratch through cleanup. Returns null when absent, and an
         /// empty slice for a present name with no value. Empty pairs are ignored.
         pub fn query(call: *Self, name: []const u8) Allocator.Error!?[]const u8 {
-            var pairs = std.mem.splitScalar(u8, call.request.query, '&');
+            var pairs = std.mem.splitScalar(
+                u8,
+                call.request.query,
+                '&',
+            );
             while (pairs.next()) |pair| {
                 if (pair.len == 0) continue;
-                const equals = std.mem.indexOfScalar(u8, pair, '=');
+                const equals = std.mem.indexOfScalar(
+                    u8,
+                    pair,
+                    '=',
+                );
                 const candidate = pair[0 .. equals orelse pair.len];
                 if (!queryNameMatches(candidate, name)) continue;
                 const encoded = if (equals) |at| pair[at + 1 ..] else "";
-                if (std.mem.indexOfAny(u8, encoded, "%+") == null) return encoded;
+                if (std.mem.indexOfAny(
+                    u8,
+                    encoded,
+                    "%+",
+                ) == null) return encoded;
                 const destination = try call.scratch.allocator().alloc(u8, encoded.len);
                 @memcpy(destination, encoded);
                 for (destination) |*byte| if (byte.* == '+') {
@@ -308,11 +369,15 @@ pub fn Call(comptime Api: type) type {
             name: []const u8,
         ) EndpointError!?T {
             const value = try call.query(name) orelse return null;
-            return std.fmt.parseInt(T, value, 10) catch error.InvalidInput;
+            return std.fmt.parseInt(
+                T,
+                value,
+                10,
+            ) catch error.InvalidInput;
         }
 
-        /// Borrows the buffered body through cleanup. Head middleware
-        /// runs before body ingestion and sees an empty slice.
+        /// Borrows the buffered body through cleanup. Head middleware and
+        /// streaming routes see an empty slice; consumers receive chunks directly.
         pub fn bodyBytes(call: *const Self) []const u8 {
             return call.body_bytes;
         }
@@ -336,7 +401,11 @@ pub fn Call(comptime Api: type) type {
 
         /// Borrows bytes through response completion. Do not pass handler-stack
         /// buffers. Asserts that bodyless statuses receive an empty slice.
-        pub fn text(_: *Self, status: Status, bytes: []const u8) http.Response {
+        pub fn text(
+            _: *Self,
+            status: Status,
+            bytes: []const u8,
+        ) http.Response {
             std.debug.assert(!bodyless(status) or bytes.len == 0);
             return .{
                 .status = @intFromEnum(status),
@@ -345,9 +414,33 @@ pub fn Call(comptime Api: type) type {
             };
         }
 
+        /// Selects a streaming response; return it from the handler or middleware.
+        /// Headers borrow static or request storage through cleanup, never stack
+        /// storage. The producer is skipped for HEAD and bodyless statuses. Null
+        /// length selects chunked HTTP/1.1, closing HTTP/1.0, or HTTP/2 DATA framing.
+        /// The producer holds one bounded lane slot while running or waiting;
+        /// configure its lane timeout for the whole response lifetime.
+        pub fn stream(
+            call: *Self,
+            options: StreamOptions,
+            producer: Producer,
+        ) http.Response {
+            call.response_producer.* = producer;
+            return .{
+                .status = @intFromEnum(options.status),
+                .headers = options.headers,
+                .body = .{ .stream = options.length },
+                .close = options.close,
+            };
+        }
+
         /// Copies bytes into request scratch, so handler-stack buffers are safe.
         /// Asserts that bodyless statuses receive an empty slice.
-        pub fn textCopy(call: *Self, status: Status, bytes: []const u8) Allocator.Error!http.Response {
+        pub fn textCopy(
+            call: *Self,
+            status: Status,
+            bytes: []const u8,
+        ) Allocator.Error!http.Response {
             std.debug.assert(!bodyless(status) or bytes.len == 0);
             return call.text(status, try call.scratch.allocator().dupe(u8, bytes));
         }
@@ -410,8 +503,18 @@ pub fn Call(comptime Api: type) type {
 
         /// Emits through the server's bounded structured-log queue. Oversized
         /// records and records emitted while the queue is full are dropped.
-        pub fn log(call: *Self, level: Logger.Level, event: []const u8, fields: anytype) void {
-            call.logs.add(platform.realtimeNs(call.io), level, event, fields);
+        pub fn log(
+            call: *Self,
+            level: Logger.Level,
+            event: []const u8,
+            fields: anytype,
+        ) void {
+            call.logs.add(
+                platform.realtimeNs(call.io),
+                level,
+                event,
+                fields,
+            );
         }
     };
 }
@@ -419,10 +522,16 @@ pub fn Call(comptime Api: type) type {
 /// Compile-time metadata whose handler, middleware and lane belong to Api.
 pub fn Route(comptime Api: type) type {
     return struct {
+        const Self = @This();
+
         pub const Specification = Api;
         pub const Lane = LaneEnum(Api);
         pub const Handler = *const fn (*Call(Api)) Call(Api).HandlerError!http.Response;
         pub const Middleware = *const fn (*Call(Api)) Call(Api).HandlerError!?http.Response;
+        /// Consumes one decoded chunk on the route's lane, serially per request.
+        /// Bytes are borrowed only until return; copy anything retained. Local
+        /// and scratch survive through request cleanup.
+        pub const BodyConsumer = *const fn (*Call(Api), []const u8) Call(Api).HandlerError!void;
 
         name: []const u8,
         method: Method,
@@ -431,6 +540,7 @@ pub fn Route(comptime Api: type) type {
         before: []const Middleware = &.{},
         body: Body = .none,
         max_body_bytes: usize = 0,
+        consume: ?BodyConsumer = null,
         lane: Lane = std.enums.values(Lane)[0],
     };
 }
@@ -445,18 +555,27 @@ pub fn endpoint(comptime options: anytype) Route(HandlerApi(options.handler)) {
         "before",
         "body",
         "max_body_bytes",
+        "consume",
         "lane",
     });
     const Api = HandlerApi(options.handler);
     const R = Route(Api);
     comptime routing.validatePath(options.path);
     const handler: R.Handler = options.handler;
-    const before: []const R.Middleware = if (@hasField(@TypeOf(options), "before"))
+    const before: []const R.Middleware = if (comptime @hasField(@TypeOf(options), "before"))
         options.before
     else
         &.{};
-    const body: Body = if (@hasField(@TypeOf(options), "body")) options.body else .none;
-    const max_body_bytes: usize = if (@hasField(@TypeOf(options), "max_body_bytes"))
+    const body: Body = if (comptime @hasField(@TypeOf(options), "body")) options.body else .none;
+    const consume: ?R.BodyConsumer = if (comptime @hasField(
+        @TypeOf(options),
+        "consume",
+    )) options.consume else null;
+    if (body == .stream and consume == null)
+        @compileError("streaming endpoints need a body consumer");
+    if (body != .stream and consume != null)
+        @compileError("body consumers require the stream policy");
+    const max_body_bytes: usize = if (comptime @hasField(@TypeOf(options), "max_body_bytes"))
         options.max_body_bytes
     else if (body == .none)
         0
@@ -467,14 +586,15 @@ pub fn endpoint(comptime options: anytype) Route(HandlerApi(options.handler)) {
     if (body == .none and max_body_bytes != 0)
         @compileError("bodyless endpoints must have max_body_bytes = 0");
     return .{
-        .name = if (@hasField(@TypeOf(options), "name")) options.name else options.path,
+        .name = if (comptime @hasField(@TypeOf(options), "name")) options.name else options.path,
         .method = options.method,
         .path = options.path,
         .handler = handler,
         .before = before,
         .body = body,
         .max_body_bytes = max_body_bytes,
-        .lane = if (@hasField(@TypeOf(options), "lane"))
+        .consume = consume,
+        .lane = if (comptime @hasField(@TypeOf(options), "lane"))
             options.lane
         else
             std.enums.values(R.Lane)[0],
@@ -491,8 +611,14 @@ pub fn get(comptime path: []const u8, comptime handler: anytype) Route(HandlerAp
 }
 
 /// Preserves heterogeneous route and middleware tuples until Application flattens them.
-pub fn Group(comptime Api: type, comptime Routes: type, comptime Before: type) type {
+pub fn Group(
+    comptime Api: type,
+    comptime Routes: type,
+    comptime Before: type,
+) type {
     return struct {
+        const Self = @This();
+
         pub const Specification = Api;
 
         prefix: []const u8,
@@ -521,7 +647,7 @@ pub fn group(comptime options: anytype) Group(
     return .{
         .prefix = options.prefix,
         .routes = options.routes,
-        .before = if (@hasField(@TypeOf(options), "before")) options.before else .{},
+        .before = if (comptime @hasField(@TypeOf(options), "before")) options.before else .{},
     };
 }
 
@@ -563,6 +689,8 @@ pub fn Application(comptime Api: type) type {
         pub const Exchange = RoutedExchange(Api);
         pub const Server = endpoint_server.Server(Self);
 
+        /// Threads and waiting slots per configured transport worker, pooled
+        /// across the server. A lane may execute one owner's requests concurrently.
         pub const LaneOptions = struct {
             threads: usize = 1,
             queue: usize = 64,
@@ -606,6 +734,7 @@ fn RoutedExchange(comptime Api: type) type {
 
         storage: []u8,
         used: usize = 0,
+        streamed_bytes: usize = 0,
         head_scratch: [headScratchBytes(Api)]u8 = undefined,
         head_allocator: Scratch = .{},
         scratch: ?Scratch = null,
@@ -628,13 +757,25 @@ fn RoutedExchange(comptime Api: type) type {
         automatic_status: ?u16 = null,
         release_pending: bool = false,
         unexpected_error: ?C.HandlerError = null,
+        cancellation: ?*const std.atomic.Value(bool) = null,
+        response_producer: ?C.Producer = null,
+        response_stream: ResponseStream = .{},
 
         pub const BodyError = error{BodyTooLarge};
 
-        /// Borrows storage and optional services for the connection's lifetime.
+        /// Borrows the stream's atomic cancellation flag through cleanup.
+        pub fn setCancellation(exchange: *Self, flag: *const std.atomic.Value(bool)) void {
+            exchange.cancellation = flag;
+        }
+
+        /// Borrows storage and optional services for the request's lifetime.
         /// No allocation is performed and the caller retains ownership. Keep the
         /// exchange at a stable address from the first hook through cleanup.
-        pub fn initApplication(exchange: *Self, storage: []u8, runtime: RuntimeInit) void {
+        pub fn initApplication(
+            exchange: *Self,
+            storage: []u8,
+            runtime: RuntimeInit,
+        ) void {
             exchange.* = .{
                 .storage = storage,
                 .services = runtime,
@@ -667,6 +808,7 @@ fn RoutedExchange(comptime Api: type) type {
         /// invoking user middleware.
         pub fn prepareHead(exchange: *Self, request: *const http.Request) ?http.Response {
             exchange.used = 0;
+            exchange.streamed_bytes = 0;
             exchange.head_allocator.init(&exchange.head_scratch);
             exchange.scratch = null;
             exchange.selected = null;
@@ -678,8 +820,17 @@ fn RoutedExchange(comptime Api: type) type {
             exchange.logs.reset();
             exchange.automatic_status = null;
             exchange.unexpected_error = null;
+            exchange.response_producer = null;
             if (!implementedMethod(request.method)) return exchange.failure(501, hasBody(request));
-            if (std.mem.eql(u8, request.method, "OPTIONS") and std.mem.eql(u8, request.path, "*")) {
+            if (std.mem.eql(
+                u8,
+                request.method,
+                "OPTIONS",
+            ) and std.mem.eql(
+                u8,
+                request.path,
+                "*",
+            )) {
                 for (Application(Api).routes) |route| exchange.addAllowed(route.method);
                 exchange.addAllowedText("OPTIONS");
                 return exchange.optionsResponse(request);
@@ -688,22 +839,37 @@ fn RoutedExchange(comptime Api: type) type {
             if (exchange.selected == null) return exchange.failure(404, hasBody(request));
             const route = exchange.selected.?;
             if (exchange.automatic_status != null) return null;
-            if (route.body == .none and (request.chunked or (request.content_length orelse 0) > 0))
+            if (route.body == .none and request.hasBody())
                 return exchange.failure(400, true);
             if (request.content_length) |length| {
-                if (length > route.max_body_bytes or length > exchange.storage.len)
+                if (length > route.max_body_bytes or
+                    (route.body != .stream and length > exchange.storage.len))
                     return exchange.failure(413, true);
             }
             if (route.body == .json and hasBody(request)) {
                 const content_type = request.getHeader("Content-Type") orelse
                     return exchange.failure(415, true);
-                const semicolon = std.mem.indexOfScalar(u8, content_type, ';') orelse
+                const semicolon = std.mem.indexOfScalar(
+                    u8,
+                    content_type,
+                    ';',
+                ) orelse
                     content_type.len;
-                const media_type = std.mem.trim(u8, content_type[0..semicolon], " \t");
+                const media_type = std.mem.trim(
+                    u8,
+                    content_type[0..semicolon],
+                    " \t",
+                );
                 if (!http.syntax.eql(media_type, "application/json"))
                     return exchange.failure(415, true);
             }
             return null;
+        }
+
+        /// True when the prepared head has only bounded generated work remaining.
+        /// No user callback runs in runHead for this request.
+        pub fn canRunHeadInline(exchange: *const Self) bool {
+            return exchange.middleware_count == 0;
         }
 
         /// Runs after prepareHead accepts a routed request. Null accepts body ingestion;
@@ -751,9 +917,11 @@ fn RoutedExchange(comptime Api: type) type {
             return exchange.selected.?.lane;
         }
 
-        /// Copies a chunk into borrowed connection storage. An oversized chunk leaves
-        /// the buffered body unchanged; call only after head middleware accepts it.
+        /// Copies a buffered route's chunk into borrowed request storage. An
+        /// oversized chunk leaves it unchanged; call after head middleware accepts.
+        /// Asserts that this is not a streaming route and response work has not begun.
         pub fn receiveBody(exchange: *Self, bytes: []const u8) BodyError!void {
+            std.debug.assert(!exchange.streamsBody());
             std.debug.assert(exchange.scratch == null);
             const route = exchange.selected orelse return error.BodyTooLarge;
             if (bytes.len > route.max_body_bytes - exchange.used or
@@ -766,6 +934,32 @@ fn RoutedExchange(comptime Api: type) type {
             exchange.used += bytes.len;
         }
 
+        /// True when the selected route consumes chunks on its application lane.
+        pub fn streamsBody(exchange: *const Self) bool {
+            const route = exchange.selected orelse return false;
+            return route.body == .stream;
+        }
+
+        /// Runs one consumer after head middleware accepts. The caller keeps bytes
+        /// stable and pauses parsing/receiving until the call returns. Scratch and
+        /// Local persist through the final handler and cleanup. A final error
+        /// response requires closure because request framing may remain unread.
+        pub fn runBody(
+            exchange: *Self,
+            request: *const http.Request,
+            bytes: []const u8,
+        ) ?http.Response {
+            const route = exchange.selected.?;
+            std.debug.assert(route.body == .stream and exchange.release_pending);
+            if (bytes.len > route.max_body_bytes - exchange.streamed_bytes)
+                return exchange.failure(413, true);
+            exchange.streamed_bytes += bytes.len;
+            var request_call = exchange.makeCall(request, exchange.bodyScratch());
+            route.consume.?(&request_call, bytes) catch |err|
+                return exchange.handlerFailure(err, true);
+            return null;
+        }
+
         /// Invokes the selected handler after body ingestion, mapping errors to HTTP.
         /// Response slices remain borrowed until completion or cleanup.
         pub fn respond(exchange: *Self, request: *const http.Request) http.Response {
@@ -774,9 +968,22 @@ fn RoutedExchange(comptime Api: type) type {
             return route.handler(&request_call) catch |err| exchange.handlerFailure(err, false);
         }
 
-        /// Generated endpoints do not support streaming; null ends production.
-        pub fn produce(_: *Self, _: []u8) ?[]const u8 {
-            return null;
+        /// Executor-only producer entry point. The transport initializes the
+        /// rendezvous first and retains the exchange until this task completes.
+        pub fn runStream(exchange: *Self, request: *const http.Request) void {
+            const producer = exchange.response_producer orelse {
+                exchange.response_stream.fail();
+                return;
+            };
+            var request_call = exchange.makeCall(request, exchange.bodyScratch());
+            producer(&request_call, &exchange.response_stream) catch |err| {
+                if (!request_call.isCanceled()) exchange.unexpected_error = err;
+                exchange.response_stream.fail();
+                return;
+            };
+            exchange.response_stream.finish() catch {
+                exchange.response_stream.fail();
+            };
         }
 
         /// Borrows the resource's Allow value until routing the next request.
@@ -834,7 +1041,11 @@ fn RoutedExchange(comptime Api: type) type {
             return &exchange.scratch.?;
         }
 
-        fn makeCall(exchange: *Self, request: *const http.Request, scratch: *Scratch) C {
+        fn makeCall(
+            exchange: *Self,
+            request: *const http.Request,
+            scratch: *Scratch,
+        ) C {
             const route_name = if (exchange.selected) |route| route.name else "unmatched";
             return .{
                 .request = request,
@@ -851,6 +1062,8 @@ fn RoutedExchange(comptime Api: type) type {
                 .request_id = exchange.request_id,
                 .route_name = route_name,
                 .allowed_methods = exchange.allowedMethods(),
+                .cancellation = exchange.cancellation,
+                .response_producer = &exchange.response_producer,
             };
         }
 
@@ -867,14 +1080,26 @@ fn RoutedExchange(comptime Api: type) type {
             for (routes) |route| {
                 if (!routing.samePattern(route.path, matched.path)) continue;
                 exchange.addAllowed(route.method);
-                if (std.mem.eql(u8, request.method, route.method.text())) exchange.selected = route;
-                if (route.method == .get and std.mem.eql(u8, request.method, "HEAD"))
+                if (std.mem.eql(
+                    u8,
+                    request.method,
+                    route.method.text(),
+                )) exchange.selected = route;
+                if (route.method == .get and std.mem.eql(
+                    u8,
+                    request.method,
+                    "HEAD",
+                ))
                     fallback = route;
             }
             if (exchange.selected == null) exchange.selected = fallback;
             if (exchange.selected == null) {
                 exchange.selected = matched;
-                exchange.automatic_status = if (std.mem.eql(u8, request.method, "OPTIONS"))
+                exchange.automatic_status = if (std.mem.eql(
+                    u8,
+                    request.method,
+                    "OPTIONS",
+                ))
                     204
                 else
                     405;
@@ -885,10 +1110,22 @@ fn RoutedExchange(comptime Api: type) type {
             for (selected.before) |middleware| exchange.appendMiddleware(middleware);
         }
 
-        fn matchPath(exchange: *Self, path: []const u8, pattern: []const u8) bool {
+        fn matchPath(
+            exchange: *Self,
+            path: []const u8,
+            pattern: []const u8,
+        ) bool {
             const old_count = exchange.parameter_count;
-            var path_segments = std.mem.splitScalar(u8, path, '/');
-            var pattern_segments = std.mem.splitScalar(u8, pattern, '/');
+            var path_segments = std.mem.splitScalar(
+                u8,
+                path,
+                '/',
+            );
+            var pattern_segments = std.mem.splitScalar(
+                u8,
+                pattern,
+                '/',
+            );
             while (true) {
                 const actual = path_segments.next();
                 const expected = pattern_segments.next();
@@ -907,7 +1144,11 @@ fn RoutedExchange(comptime Api: type) type {
                         .value = actual.?,
                     };
                     exchange.parameter_count += 1;
-                } else if (!std.mem.eql(u8, actual.?, expected.?)) {
+                } else if (!std.mem.eql(
+                    u8,
+                    actual.?,
+                    expected.?,
+                )) {
                     exchange.parameter_count = old_count;
                     return false;
                 }
@@ -921,8 +1162,16 @@ fn RoutedExchange(comptime Api: type) type {
         }
 
         fn addAllowedText(exchange: *Self, text: []const u8) void {
-            var methods = std.mem.splitSequence(u8, exchange.allow[0..exchange.allow_len], ", ");
-            while (methods.next()) |item| if (std.mem.eql(u8, item, text)) return;
+            var methods = std.mem.splitSequence(
+                u8,
+                exchange.allow[0..exchange.allow_len],
+                ", ",
+            );
+            while (methods.next()) |item| if (std.mem.eql(
+                u8,
+                item,
+                text,
+            )) return;
             const separator = if (exchange.allow_len == 0) "" else ", ";
             std.debug.assert(separator.len + text.len <= exchange.allow.len - exchange.allow_len);
             @memcpy(exchange.allow[exchange.allow_len..][0..separator.len], separator);
@@ -937,7 +1186,11 @@ fn RoutedExchange(comptime Api: type) type {
             exchange.middleware_count += 1;
         }
 
-        fn failure(exchange: *Self, status: u16, close: bool) http.Response {
+        fn failure(
+            exchange: *Self,
+            status: u16,
+            close: bool,
+        ) http.Response {
             @branchHint(.cold);
             exchange.generated_headers = .{
                 .{ .name = "Content-Type", .value = "text/plain; charset=utf-8" },
@@ -963,7 +1216,11 @@ fn RoutedExchange(comptime Api: type) type {
             };
         }
 
-        fn handlerFailure(exchange: *Self, err: C.HandlerError, close: bool) http.Response {
+        fn handlerFailure(
+            exchange: *Self,
+            err: C.HandlerError,
+            close: bool,
+        ) http.Response {
             @branchHint(.cold);
             if (err == error.InvalidInput) return exchange.failure(400, close);
             // This is the HTTP boundary: retain allocation and application errors
@@ -990,14 +1247,14 @@ fn HandlerApi(comptime handler: anytype) type {
     if (pointer != .pointer or pointer.pointer.size != .one)
         @compileError("endpoint handlers take one *zhtps.Call argument");
     const C = pointer.pointer.child;
-    if (!@hasDecl(C, "Specification"))
+    if (comptime !@hasDecl(C, "Specification"))
         @compileError("endpoint handler argument must be *zhtps.Call(Api)");
     return C.Specification;
 }
 
 fn EntryApi(comptime entry: anytype) type {
     const Entry = @TypeOf(entry);
-    if (!@hasDecl(Entry, "Specification"))
+    if (comptime !@hasDecl(Entry, "Specification"))
         @compileError("endpoint group contains an invalid entry");
     return Entry.Specification;
 }
@@ -1008,14 +1265,14 @@ fn GroupApi(comptime routes: anytype) type {
 }
 
 fn LaneEnum(comptime Api: type) type {
-    if (!@hasDecl(Api, "lanes")) return enum { default };
+    if (comptime !@hasDecl(Api, "lanes")) return enum { default };
     if (std.meta.fields(@TypeOf(Api.lanes)).len == 0)
         @compileError("an application must declare at least one lane");
     return std.meta.FieldEnum(@TypeOf(Api.lanes));
 }
 
 fn hasBody(request: *const http.Request) bool {
-    return request.chunked or (request.content_length orelse 0) > 0;
+    return request.hasBody();
 }
 
 fn bodyless(status: Status) bool {
@@ -1044,26 +1301,34 @@ fn queryNameMatches(encoded: []const u8, name: []const u8) bool {
 
 fn implementedMethod(request_method: []const u8) bool {
     inline for (std.meta.tags(Method)) |method| {
-        if (std.mem.eql(u8, request_method, method.text())) return true;
+        if (std.mem.eql(
+            u8,
+            request_method,
+            method.text(),
+        )) return true;
     }
     return false;
 }
 
 fn headScratchBytes(comptime Api: type) usize {
-    const size = if (@hasDecl(Api, "head_scratch_bytes")) Api.head_scratch_bytes else 1024;
+    const size = if (comptime @hasDecl(Api, "head_scratch_bytes")) Api.head_scratch_bytes else 1024;
     if (size > 64 * 1024) @compileError("endpoint head scratch cannot exceed 64 KiB");
     return size;
 }
 
 fn HandlerErrors(comptime Api: type) type {
-    const ErrorSet = if (@hasDecl(Api, "HandlerError")) Api.HandlerError else EndpointError;
+    const ErrorSet = if (comptime @hasDecl(Api, "HandlerError")) Api.HandlerError else EndpointError;
     const info = @typeInfo(ErrorSet);
     if (info != .error_set) @compileError("Api.HandlerError must be an error set");
     if (info.error_set == null) @compileError("Api.HandlerError must be a closed error set");
     for (@typeInfo(EndpointError).error_set.?) |required| {
         const found = found: {
             for (info.error_set.?) |item| {
-                if (std.mem.eql(u8, item.name, required.name)) break :found true;
+                if (std.mem.eql(
+                    u8,
+                    item.name,
+                    required.name,
+                )) break :found true;
             }
             break :found false;
         };
@@ -1072,7 +1337,7 @@ fn HandlerErrors(comptime Api: type) type {
     return ErrorSet;
 }
 
-fn accessValue(access: *Access, value: anytype) ?Logger.Attribute.Value {
+fn accessValue(access: *Access, value: anytype) ?Logger.Attribute.Scalar {
     const T = @TypeOf(value);
     return switch (@typeInfo(T)) {
         .bool => .{ .boolean = value },
@@ -1120,7 +1385,7 @@ fn accessValue(access: *Access, value: anytype) ?Logger.Attribute.Value {
 }
 
 test "endpoint application routes parameters middleware query and json bodies" {
-    const Api = struct {
+    const api = struct {
         const Spec = @This();
         const ApiCall = Call(Spec);
 
@@ -1130,7 +1395,7 @@ test "endpoint application routes parameters middleware query and json bodies" {
 
         pub const HandlerError = EndpointError || error{NotAuthenticated};
 
-        pub const Metrics = struct {
+        pub const metrics = struct {
             pub const Counter = enum { widgets_created_total };
         };
 
@@ -1148,7 +1413,11 @@ test "endpoint application routes parameters middleware query and json bodies" {
             const input = try call.bodyJson(struct { name: []const u8 });
             call.metrics.add(.widgets_created_total, 1);
             call.access.put("widget_id", id);
-            call.log(.info, "widget_created", .{ .widget_id = id });
+            call.log(
+                .info,
+                "widget_created",
+                .{ .widget_id = id },
+            );
             return try call.json(.created, .{
                 .id = id,
                 .name = input.name,
@@ -1173,16 +1442,25 @@ test "endpoint application routes parameters middleware query and json bodies" {
             }),
         };
     };
-    const App = Application(Api);
+    const App = Application(api);
     var storage: [4096]u8 = undefined;
     var exchange: App.Exchange = undefined;
     exchange.initApplication(&storage, {});
     var slots: [2]Logger.Slot = undefined;
     var server_metrics: ServerMetrics = .{};
     var logger: Logger = undefined;
-    logger.init(&slots, &server_metrics, false);
+    logger.init(
+        &slots,
+        &server_metrics,
+        false,
+    );
     var application_metrics: App.CustomMetrics = .{};
-    exchange.setRequestRuntime(&application_metrics, std.testing.io, 7, 9);
+    exchange.setRequestRuntime(
+        &application_metrics,
+        std.testing.io,
+        7,
+        9,
+    );
     const request: http.Request = .{
         .method = "POST",
         .path = "/v1/widgets/42",
@@ -1195,8 +1473,16 @@ test "endpoint application routes parameters middleware query and json bodies" {
     const response = exchange.respond(&request);
     exchange.flushLogs(&logger);
     try std.testing.expectEqual(@as(u16, 201), response.status);
-    try std.testing.expect(std.mem.indexOf(u8, response.body.bytes, "\"id\":42") != null);
-    try std.testing.expect(std.mem.indexOf(u8, response.body.bytes, "\"notify\":\"yes\"") != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        response.body.bytes,
+        "\"id\":42",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        response.body.bytes,
+        "\"notify\":\"yes\"",
+    ) != null);
     try std.testing.expectEqual(@as(u64, 1), application_metrics.snapshot().counters[0]);
     try std.testing.expectEqual(@as(usize, 1), exchange.accessFields().len);
     const logged = logger.peek().?;
@@ -1223,7 +1509,7 @@ test "structured attributes drop values outside the log representation" {
 }
 
 test "endpoint application reports not found method and media type failures" {
-    const Api = struct {
+    const api = struct {
         const ApiCall = Call(@This());
 
         fn create(_: *ApiCall) !http.Response {
@@ -1240,7 +1526,7 @@ test "endpoint application reports not found method and media type failures" {
             }),
         };
     };
-    const App = Application(Api);
+    const App = Application(api);
     var storage: [32]u8 = undefined;
     var exchange: App.Exchange = undefined;
     exchange.initApplication(&storage, {});
@@ -1271,7 +1557,7 @@ test "endpoint application reports not found method and media type failures" {
 }
 
 test "middleware scratch survives body ingestion" {
-    const Api = struct {
+    const api = struct {
         const Spec = @This();
         const ApiCall = Call(Spec);
 
@@ -1300,7 +1586,7 @@ test "middleware scratch survives body ingestion" {
             }),
         };
     };
-    const App = Application(Api);
+    const App = Application(api);
     var storage: [256]u8 = undefined;
     var exchange: App.Exchange = undefined;
     exchange.initApplication(&storage, {});
@@ -1344,7 +1630,7 @@ test "access updates reclaim strings preserve old values on overflow and accept 
 }
 
 test "explicit OPTIONS sees all resource methods regardless of declaration order" {
-    const Api = struct {
+    const api = struct {
         fn respond(call: *Call(@This())) EndpointError!http.Response {
             return call.text(.ok, "ok");
         }
@@ -1363,7 +1649,7 @@ test "explicit OPTIONS sees all resource methods regardless of declaration order
         };
     };
     var storage: [256]u8 = undefined;
-    var exchange: Application(Api).Exchange = undefined;
+    var exchange: Application(api).Exchange = undefined;
     exchange.initApplication(&storage, {});
     const request: http.Request = .{ .method = "OPTIONS", .path = "/" };
     try std.testing.expect(exchange.receiveHead(&request) == null);
@@ -1373,7 +1659,7 @@ test "explicit OPTIONS sees all resource methods regardless of declaration order
 }
 
 test "unexpected handler and middleware errors retain their names in structured logs" {
-    const Api = struct {
+    const api = struct {
         pub const HandlerError = EndpointError || error{ServiceUnavailable};
         fn before(_: *Call(@This())) HandlerError!?http.Response {
             return error.ServiceUnavailable;
@@ -1392,14 +1678,23 @@ test "unexpected handler and middleware errors retain their names in structured 
         };
     };
     var storage: [256]u8 = undefined;
-    var exchange: Application(Api).Exchange = undefined;
+    var exchange: Application(api).Exchange = undefined;
     exchange.initApplication(&storage, {});
-    var application_metrics: Application(Api).CustomMetrics = .{};
-    exchange.setRequestRuntime(&application_metrics, std.testing.io, 1, 2);
+    var application_metrics: Application(api).CustomMetrics = .{};
+    exchange.setRequestRuntime(
+        &application_metrics,
+        std.testing.io,
+        1,
+        2,
+    );
     var server_metrics: ServerMetrics = .{};
     var slots: [2]Logger.Slot = undefined;
     var logger: Logger = undefined;
-    logger.init(&slots, &server_metrics, false);
+    logger.init(
+        &slots,
+        &server_metrics,
+        false,
+    );
     for ([_][]const u8{ "/handler", "/middleware" }) |path| {
         const request: http.Request = .{ .method = "GET", .path = path };
         const response = exchange.receiveHead(&request) orelse exchange.respond(&request);
@@ -1422,14 +1717,14 @@ test "unexpected handler and middleware errors retain their names in structured 
 }
 
 test "empty query pairs do not match an empty name" {
-    const Api = struct {
+    const api = struct {
         fn respond(call: *Call(@This())) EndpointError!http.Response {
             return call.text(.ok, try call.query("") orelse "missing");
         }
         pub const routes = .{get("/", respond)};
     };
     var storage: [256]u8 = undefined;
-    var exchange: Application(Api).Exchange = undefined;
+    var exchange: Application(api).Exchange = undefined;
     exchange.initApplication(&storage, {});
     const cases = [_][2][]const u8{
         .{ "", "missing" },
@@ -1449,7 +1744,7 @@ test "empty query pairs do not match an empty name" {
 }
 
 test "response helpers preserve prior allocations and roll back failed serialization" {
-    const Api = struct {
+    const api = struct {
         const Node = struct { next: ?*@This() = null };
         fn respond(call: *Call(@This())) !http.Response {
             var source = "original".*;
@@ -1477,7 +1772,7 @@ test "response helpers preserve prior allocations and roll back failed serializa
         pub const routes = .{get("/", respond)};
     };
     var storage: [2048]u8 = undefined;
-    var exchange: Application(Api).Exchange = undefined;
+    var exchange: Application(api).Exchange = undefined;
     exchange.initApplication(&storage, {});
     const request: http.Request = .{ .method = "GET", .path = "/" };
     try std.testing.expect(exchange.receiveHead(&request) == null);
@@ -1488,7 +1783,7 @@ test "response helpers preserve prior allocations and roll back failed serializa
 }
 
 test "scratch exhaustion preserves cleanup inputs and reclaims the next request budget" {
-    const Api = struct {
+    const api = struct {
         const C = Call(@This());
         pub const Services = struct { releases: usize = 0, intact: bool = true };
         pub const Local = struct { retained: []const u8 = "" };
@@ -1504,8 +1799,16 @@ test "scratch exhaustion preserves cleanup inputs and reclaims the next request 
                 call.services.intact = false;
             } else |err| {
                 call.services.intact = call.services.intact and err == error.OutOfMemory and
-                    std.mem.eql(u8, call.local.retained, "x" ** 64) and
-                    std.mem.eql(u8, call.bodyBytes(), "body");
+                    std.mem.eql(
+                        u8,
+                        call.local.retained,
+                        "x" ** 64,
+                    ) and
+                    std.mem.eql(
+                        u8,
+                        call.bodyBytes(),
+                        "body",
+                    );
             }
             call.services.releases += 1;
         }
@@ -1517,8 +1820,8 @@ test "scratch exhaustion preserves cleanup inputs and reclaims the next request 
         })};
     };
     var storage: [68]u8 = undefined;
-    var services: Api.Services = .{};
-    var exchange: Application(Api).Exchange = undefined;
+    var services: api.Services = .{};
+    var exchange: Application(api).Exchange = undefined;
     exchange.initApplication(&storage, &services);
     const request: http.Request = .{
         .method = "POST",

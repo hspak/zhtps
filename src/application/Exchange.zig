@@ -5,7 +5,7 @@ const http = @import("../http.zig");
 const log = std.log.scoped(.application);
 const Exchange = @This();
 
-storage: []u8,
+storage: []u8 = &.{},
 used: usize = 0,
 route: enum {
     root,
@@ -29,6 +29,7 @@ const stream_length = length: {
     break :length size;
 };
 
+/// Borrows response storage through response completion; initialization does not allocate.
 pub fn init(exchange: *Exchange, storage: []u8) void {
     exchange.* = .{ .storage = storage };
 }
@@ -36,30 +37,74 @@ pub fn init(exchange: *Exchange, storage: []u8) void {
 /// Returns a final response before body processing. Its fields borrow the
 /// exchange until all sends complete. Unread content requires connection closure.
 pub fn receiveHead(exchange: *Exchange, request: *const http.Request) ?http.Response {
-    exchange.route = if (std.mem.eql(u8, request.path, "/"))
+    exchange.route = if (std.mem.eql(
+        u8,
+        request.path,
+        "/",
+    ))
         .root
-    else if (std.mem.eql(u8, request.path, "/echo"))
+    else if (std.mem.eql(
+        u8,
+        request.path,
+        "/echo",
+    ))
         .echo
-    else if (std.mem.eql(u8, request.path, "/stream"))
+    else if (std.mem.eql(
+        u8,
+        request.path,
+        "/stream",
+    ))
         .stream
     else
         .missing;
-    if (std.mem.eql(u8, request.method, "OPTIONS")) return null;
-    const implemented = std.mem.eql(u8, request.method, "GET") or
-        std.mem.eql(u8, request.method, "HEAD") or std.mem.eql(u8, request.method, "POST");
+    if (std.mem.eql(
+        u8,
+        request.method,
+        "OPTIONS",
+    )) return null;
+    const implemented = std.mem.eql(
+        u8,
+        request.method,
+        "GET",
+    ) or
+        std.mem.eql(
+            u8,
+            request.method,
+            "HEAD",
+        ) or std.mem.eql(
+        u8,
+        request.method,
+        "POST",
+    );
     if (!implemented) return exchange.earlyStatus(501);
     if (exchange.route == .missing) return exchange.earlyStatus(404);
     if (exchange.route == .echo) {
-        if (!std.mem.eql(u8, request.method, "POST")) return exchange.earlyStatus(405);
+        if (!std.mem.eql(
+            u8,
+            request.method,
+            "POST",
+        )) return exchange.earlyStatus(405);
         if (request.content_length) |len| if (len > exchange.storage.len) return exchange.earlyStatus(413);
-    } else if (!std.mem.eql(u8, request.method, "GET") and !std.mem.eql(u8, request.method, "HEAD")) {
+    } else if (!std.mem.eql(
+        u8,
+        request.method,
+        "GET",
+    ) and !std.mem.eql(
+        u8,
+        request.method,
+        "HEAD",
+    )) {
         return exchange.earlyStatus(405);
     }
     // These representations have no modification time, so date preconditions do not apply.
-    const precondition = http.conditions.evaluate(request, .{
-        .exists = exchange.route != .echo,
-        .etag = exchange.entityTag(),
-    }, 0) catch return exchange.earlyStatus(400);
+    const precondition = http.conditions.evaluate(
+        request,
+        .{
+            .exists = exchange.route != .echo,
+            .etag = exchange.entityTag(),
+        },
+        0,
+    ) catch return exchange.earlyStatus(400);
     if (precondition) |status| {
         if (status != 304) return exchange.earlyStatus(status);
         exchange.fields[0] = .{ .name = "ETag", .value = exchange.entityTag().? };
@@ -69,7 +114,7 @@ pub fn receiveHead(exchange: *Exchange, request: *const http.Request) ?http.Resp
             .body = .{ .stream = if (exchange.route == .root) root_body.len else stream_length },
             // The head is already consumed. With no content, its boundary
             // is also the request boundary and pipelined bytes stay intact.
-            .close = request.chunked or (request.content_length orelse 0) > 0,
+            .close = request.hasBody(),
         };
     }
     return null;
@@ -94,6 +139,7 @@ fn entityTag(exchange: *const Exchange) ?[]const u8 {
     };
 }
 
+/// Returns the Allow field for the selected resource, borrowing static storage.
 pub fn allowedMethods(exchange: *const Exchange) []const u8 {
     return switch (exchange.route) {
         .root, .stream => "GET, HEAD, OPTIONS",
@@ -123,10 +169,18 @@ pub fn receiveBody(exchange: *Exchange, bytes: []const u8) BodyError!void {
 
 /// The response borrows exchange storage until all sends finish.
 pub fn respond(exchange: *Exchange, request: *const http.Request) http.Response {
-    if (std.mem.eql(u8, request.method, "OPTIONS")) {
+    if (std.mem.eql(
+        u8,
+        request.method,
+        "OPTIONS",
+    )) {
         exchange.fields[0] = .{
             .name = "Allow",
-            .value = if (std.mem.eql(u8, request.path, "*")) "GET, HEAD, POST, OPTIONS" else exchange.allowedMethods(),
+            .value = if (std.mem.eql(
+                u8,
+                request.path,
+                "*",
+            )) "GET, HEAD, POST, OPTIONS" else exchange.allowedMethods(),
         };
         return .{ .status = 204, .headers = exchange.fields[0..1] };
     }

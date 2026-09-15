@@ -15,13 +15,21 @@ pub fn write(snapshot: *const Metrics.Snapshot, writer: *std.Io.Writer) std.Io.W
     try writer.writeByte('\n');
 }
 
-pub fn writeValue(snapshot: *const Metrics.Snapshot, json: *std.json.Stringify) std.Io.Writer.Error!void {
+/// Serializes a complete JSON object through an existing stringifier; borrows snapshot.
+pub fn writeValue(
+    snapshot: *const Metrics.Snapshot,
+    json: *std.json.Stringify,
+) std.Io.Writer.Error!void {
     try json.beginObject();
     try writeFields(snapshot, json);
     try json.endObject();
 }
 
-pub fn writeFields(snapshot: *const Metrics.Snapshot, json: *std.json.Stringify) std.Io.Writer.Error!void {
+/// Adds metrics to the current JSON object without opening or closing it; borrows snapshot.
+pub fn writeFields(
+    snapshot: *const Metrics.Snapshot,
+    json: *std.json.Stringify,
+) std.Io.Writer.Error!void {
     try json.objectField("counters");
     try json.beginObject();
     inline for (std.meta.tags(Metrics.Counter)) |counter| {
@@ -63,10 +71,19 @@ test "json metrics preserve names and raw histogram units" {
     metrics.observe(.request_duration_seconds, 2_000_000_000);
     const snapshot = metrics.snapshot();
     var buffer: [16 * 1024]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
+    var writer: std.Io.Writer = .fixed(&buffer);
     try write(&snapshot, &writer);
-    try testing.expect(std.mem.endsWith(u8, writer.buffered(), "\n"));
-    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, writer.buffered(), .{});
+    try testing.expect(std.mem.endsWith(
+        u8,
+        writer.buffered(),
+        "\n",
+    ));
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        testing.allocator,
+        writer.buffered(),
+        .{},
+    );
     defer parsed.deinit();
     const counters = parsed.value.object.get("counters").?.object;
     try testing.expectEqual(@as(i64, 2), counters.get("requests_admitted_total").?.integer);

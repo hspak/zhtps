@@ -5,7 +5,7 @@ const Metrics = @import("Metrics.zig");
 const log = std.log.scoped(.logger);
 const Logger = @This();
 
-slots: []Slot,
+slots: []Slot = &.{},
 metrics: *Metrics,
 verbose: bool = false,
 enabled: bool = true,
@@ -28,9 +28,9 @@ pub const Level = enum {
 
 pub const Attribute = struct {
     name: []const u8,
-    value: Value,
+    value: Scalar,
 
-    pub const Value = union(enum) {
+    pub const Scalar = union(enum) {
         string: []const u8,
         signed: i64,
         unsigned: u64,
@@ -64,10 +64,21 @@ pub const Event = struct {
 /// Borrows queue storage and metrics until the logger is discarded. The owning
 /// event-loop thread alone may mutate the queue. A peeked slot stays stable
 /// until that record is consumed, including while the kernel references its bytes.
-pub fn init(logger: *Logger, slots: []Slot, metrics: *Metrics, verbose: bool) void {
-    logger.* = .{ .slots = slots, .metrics = metrics, .verbose = verbose };
+pub fn init(
+    logger: *Logger,
+    slots: []Slot,
+    metrics: *Metrics,
+    verbose: bool,
+) void {
+    logger.* = .{
+        .slots = slots,
+        .metrics = metrics,
+        .verbose = verbose,
+    };
 }
 
+/// Copies an event into the bounded queue without I/O. Drops disabled, oversized, or
+/// full-queue events; caller-owned strings may be released on return.
 pub fn emit(logger: *Logger, event: Event) void {
     if (!logger.enabled) return;
     if (event.level == .debug and !logger.verbose) return;
@@ -76,7 +87,7 @@ pub fn emit(logger: *Logger, event: Event) void {
         return;
     }
     const slot = &logger.slots[(logger.read_index + logger.count) % logger.slots.len];
-    var writer = std.Io.Writer.fixed(&slot.bytes);
+    var writer: std.Io.Writer = .fixed(&slot.bytes);
     var record = event;
     record.worker = logger.worker;
     writeRecord(record, &writer) catch {
@@ -145,10 +156,14 @@ fn writeRecord(record: Event, writer: *std.Io.Writer) std.Io.Writer.Error!void {
 }
 
 fn writeJsonString(value: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    try std.json.Stringify.value(value, .{}, writer);
+    try std.json.Stringify.value(
+        value,
+        .{},
+        writer,
+    );
 }
 
-fn writeAttribute(value: Attribute.Value, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+fn writeAttribute(value: Attribute.Scalar, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (value) {
         .string => |item| try writeJsonString(item, writer),
         .signed => |item| try writer.print("{d}", .{item}),
@@ -159,6 +174,7 @@ fn writeAttribute(value: Attribute.Value, writer: *std.Io.Writer) std.Io.Writer.
     }
 }
 
+/// Borrows the next unsent slot until consume removes it; null means the queue is empty.
 pub fn peek(logger: *Logger) ?*Slot {
     return logger.peekAt(0);
 }
@@ -202,12 +218,29 @@ test "logger escapes JSON, filters debug, and drops when queue is full" {
     var slots: [1]Slot = undefined;
     var metrics: Metrics = .{};
     var logger: Logger = undefined;
-    logger.init(&slots, &metrics, false);
-    logger.emit(.{ .timestamp_ns = 0, .level = .debug, .event = "hidden" });
+    logger.init(
+        &slots,
+        &metrics,
+        false,
+    );
+    logger.emit(.{
+        .timestamp_ns = 0,
+        .level = .debug,
+        .event = "hidden",
+    });
     try testing.expect(logger.peek() == null);
-    logger.emit(.{ .timestamp_ns = 1, .event = "request", .reason = "quote\"\nnewline" });
+    logger.emit(.{
+        .timestamp_ns = 1,
+        .event = "request",
+        .reason = "quote\"\nnewline",
+    });
     const first = logger.peek().?;
-    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, first.bytes[0..first.len], .{});
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        testing.allocator,
+        first.bytes[0..first.len],
+        .{},
+    );
     defer parsed.deinit();
     try testing.expectEqualStrings("quote\"\nnewline", parsed.value.object.get("reason").?.string);
     logger.emit(.{ .timestamp_ns = 2, .event = "dropped" });
@@ -215,8 +248,16 @@ test "logger escapes JSON, filters debug, and drops when queue is full" {
     try testing.expectEqual(@as(usize, 1), logger.count);
     logger.consume();
     logger.verbose = true;
-    logger.emit(.{ .timestamp_ns = 3, .level = .debug, .event = "visible" });
-    try testing.expect(std.mem.indexOf(u8, logger.peek().?.bytes[0..logger.peek().?.len], "visible") != null);
+    logger.emit(.{
+        .timestamp_ns = 3,
+        .level = .debug,
+        .event = "visible",
+    });
+    try testing.expect(std.mem.indexOf(
+        u8,
+        logger.peek().?.bytes[0..logger.peek().?.len],
+        "visible",
+    ) != null);
 }
 
 test "batched log writes preserve partial records across queue wrap" {
@@ -224,7 +265,11 @@ test "batched log writes preserve partial records across queue wrap" {
     var slots: [3]Slot = undefined;
     var metrics: Metrics = .{};
     var logger: Logger = undefined;
-    logger.init(&slots, &metrics, false);
+    logger.init(
+        &slots,
+        &metrics,
+        false,
+    );
     logger.emit(.{ .timestamp_ns = 0, .event = "discard" });
     logger.consume();
     logger.emit(.{ .timestamp_ns = 1, .event = "first" });
@@ -241,7 +286,11 @@ test "batched log writes preserve partial records across queue wrap" {
     try testing.expectEqual(@as(usize, 5), third.sent);
     logger.emit(.{ .timestamp_ns = 4, .event = "fourth" });
     try testing.expectEqual(@as(usize, 1), logger.consumeBytes(third.len - third.sent));
-    try testing.expect(std.mem.indexOf(u8, logger.peek().?.bytes[0..logger.peek().?.len], "fourth") != null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        logger.peek().?.bytes[0..logger.peek().?.len],
+        "fourth",
+    ) != null);
     try testing.expectEqual(@as(u64, 1), metrics.snapshot().gauge(.log_pending));
     try testing.expectEqual(@as(usize, 1), logger.consumeBytes(logger.peek().?.len));
     try testing.expect(logger.peek() == null);
@@ -252,7 +301,11 @@ test "access records preserve escaping, extra fields and overflow accounting" {
     var slots: [1]Slot = undefined;
     var metrics: Metrics = .{};
     var logger: Logger = undefined;
-    logger.init(&slots, &metrics, false);
+    logger.init(
+        &slots,
+        &metrics,
+        false,
+    );
     logger.worker = 7;
     var event: Event = .{
         .timestamp_ns = 1,
@@ -273,7 +326,12 @@ test "access records preserve escaping, extra fields and overflow accounting" {
     logger.consume();
     event.reason = "detail";
     logger.emit(event);
-    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, logger.peek().?.bytes[0..logger.peek().?.len], .{});
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        testing.allocator,
+        logger.peek().?.bytes[0..logger.peek().?.len],
+        .{},
+    );
     defer parsed.deinit();
     try testing.expectEqualStrings("detail", parsed.value.object.get("reason").?.string);
     try testing.expectEqualStrings("G\"ET\n", parsed.value.object.get("method").?.string);
@@ -292,7 +350,11 @@ test "logger appends route and structured fields" {
     var slots: [1]Slot = undefined;
     var metrics: Metrics = .{};
     var logger: Logger = undefined;
-    logger.init(&slots, &metrics, false);
+    logger.init(
+        &slots,
+        &metrics,
+        false,
+    );
     logger.emit(.{
         .timestamp_ns = 1,
         .event = "custom",

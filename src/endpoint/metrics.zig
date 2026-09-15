@@ -21,7 +21,11 @@ pub fn Metrics(comptime Definition: type) type {
     validateEnum(Counter, "Counter");
     validateEnum(Gauge, "Gauge");
     validateEnum(Histogram, "Histogram");
-    validateNames(Counter, Gauge, Histogram);
+    validateNames(
+        Counter,
+        Gauge,
+        Histogram,
+    );
 
     return struct {
         const Self = @This();
@@ -76,18 +80,30 @@ pub fn Metrics(comptime Definition: type) type {
         };
 
         /// Safe from application executor threads and concurrent snapshot readers.
-        pub fn add(metrics: *Self, id: Counter, amount: u64) void {
+        pub fn add(
+            metrics: *Self,
+            id: Counter,
+            amount: u64,
+        ) void {
             _ = metrics.counters[@intFromEnum(id)].fetchAdd(amount, .monotonic);
         }
 
         /// Gauges are summed across workers. Callers partitioned by worker should
         /// record their local value rather than a process-wide duplicate.
-        pub fn set(metrics: *Self, id: Gauge, amount: u64) void {
+        pub fn set(
+            metrics: *Self,
+            id: Gauge,
+            amount: u64,
+        ) void {
             metrics.gauges[@intFromEnum(id)].store(amount, .monotonic);
         }
 
         /// Records a nanosecond duration using the server's histogram bounds.
-        pub fn observe(metrics: *Self, id: Histogram, nanoseconds: u64) void {
+        pub fn observe(
+            metrics: *Self,
+            id: Histogram,
+            nanoseconds: u64,
+        ) void {
             const distribution = &metrics.histograms[@intFromEnum(id)];
             var bucket: usize = 0;
             while (bucket < bounds_ns.len and nanoseconds > bounds_ns[bucket]) : (bucket += 1) {}
@@ -226,7 +242,15 @@ fn validateEnum(comptime T: type, comptime name: []const u8) void {
 /// Requires a metric identifier outside the server's reserved zhtps namespace.
 pub fn validateNamespace(comptime namespace: []const u8) void {
     validateName(namespace);
-    if (std.mem.eql(u8, namespace, "zhtps") or std.mem.startsWith(u8, namespace, "zhtps_"))
+    if (std.mem.eql(
+        u8,
+        namespace,
+        "zhtps",
+    ) or std.mem.startsWith(
+        u8,
+        namespace,
+        "zhtps_",
+    ))
         @compileError("the zhtps metric namespace is reserved");
 }
 
@@ -239,7 +263,11 @@ fn validateName(comptime name: []const u8) void {
     }
 }
 
-fn validateNames(comptime Counter: type, comptime Gauge: type, comptime Histogram: type) void {
+fn validateNames(
+    comptime Counter: type,
+    comptime Gauge: type,
+    comptime Histogram: type,
+) void {
     const count = std.meta.fields(Counter).len + std.meta.fields(Gauge).len +
         4 * std.meta.fields(Histogram).len;
     var names: [count][]const u8 = undefined;
@@ -266,19 +294,23 @@ fn validateNames(comptime Counter: type, comptime Gauge: type, comptime Histogra
     }
     for (names, 0..) |name, at| {
         for (names[at + 1 ..]) |other| {
-            if (std.mem.eql(u8, name, other))
+            if (std.mem.eql(
+                u8,
+                name,
+                other,
+            ))
                 @compileError("duplicate emitted metric name: " ++ name);
         }
     }
 }
 
 test "custom metrics aggregate and format without dynamic names" {
-    const Definition = struct {
+    const definition = struct {
         pub const Counter = enum { widgets_created_total };
         pub const Gauge = enum { jobs_active };
         pub const Histogram = enum { auth_duration_seconds };
     };
-    const Custom = Metrics(Definition);
+    const Custom = Metrics(definition);
     var first: Custom = .{};
     var second: Custom = .{};
     first.add(.widgets_created_total, 2);
@@ -291,8 +323,12 @@ test "custom metrics aggregate and format without dynamic names" {
     const other = second.snapshot();
     captured.merge(&other);
     var buffer: [4096]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
-    try Custom.writePrometheus(&captured, &writer, "example");
+    var writer: std.Io.Writer = .fixed(&buffer);
+    try Custom.writePrometheus(
+        &captured,
+        &writer,
+        "example",
+    );
     try std.testing.expect(std.mem.indexOf(
         u8,
         writer.buffered(),

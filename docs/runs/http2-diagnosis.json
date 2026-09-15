@@ -1,0 +1,987 @@
+{
+  "schema_version": 1,
+  "description": "Recorded run setup and summarized results; historical paths identify original artifacts.",
+  "raw_measurements_retained": false,
+  "records": {
+    "docs/http2-diagnosis/audit.json": {
+      "original_sha256": "e11821109172ebd7dbdd2bac0ed020826b93c2fee97e253efe870a96d1b9d14f",
+      "omitted_fields": {},
+      "record": {
+        "baseline": {
+          "passed": true,
+          "trials": 3,
+          "measured_successes": 6155596,
+          "failures_by_phase_and_kind": {
+            "setup": {},
+            "holding": {},
+            "warmup": {
+              "timeout": 1639
+            },
+            "measurement": {
+              "timeout": 15238
+            }
+          },
+          "failure_records": 16877,
+          "setup_unattempted": 0,
+          "partial_population_trials": 0,
+          "unexpected_server_exits": 0
+        },
+        "client7": {
+          "passed": true,
+          "trials": 3,
+          "measured_successes": 6953159,
+          "failures_by_phase_and_kind": {
+            "setup": {},
+            "holding": {},
+            "warmup": {
+              "timeout": 455
+            },
+            "measurement": {
+              "timeout": 7249
+            }
+          },
+          "failure_records": 7704,
+          "setup_unattempted": 0,
+          "partial_population_trials": 0,
+          "unexpected_server_exits": 0
+        },
+        "paired": {
+          "passed": true,
+          "trials": 1,
+          "measured_successes": 1983583,
+          "failures_by_phase_and_kind": {
+            "setup": {},
+            "holding": {},
+            "warmup": {
+              "timeout": 451
+            },
+            "measurement": {
+              "timeout": 3615
+            }
+          },
+          "failure_records": 4066,
+          "setup_unattempted": 0,
+          "partial_population_trials": 0,
+          "unexpected_server_exits": 0
+        },
+        "nic-busy7": {
+          "passed": true,
+          "trials": 3,
+          "measured_successes": 5966631,
+          "failures_by_phase_and_kind": {
+            "setup": {},
+            "holding": {},
+            "warmup": {
+              "timeout": 1412
+            },
+            "measurement": {
+              "timeout": 12754
+            }
+          },
+          "failure_records": 14166,
+          "setup_unattempted": 0,
+          "partial_population_trials": 0,
+          "unexpected_server_exits": 0
+        },
+        "nic-free7": {
+          "passed": true,
+          "trials": 3,
+          "measured_successes": 6647140,
+          "failures_by_phase_and_kind": {
+            "setup": {},
+            "holding": {},
+            "warmup": {
+              "timeout": 561
+            },
+            "measurement": {
+              "timeout": 18319
+            }
+          },
+          "failure_records": 18880,
+          "setup_unattempted": 0,
+          "partial_population_trials": 0,
+          "unexpected_server_exits": 0
+        },
+        "loopback": {
+          "passed": true,
+          "trials": 3,
+          "failure_records": 0
+        },
+        "nic-samples": {
+          "passed": true,
+          "trials": 1,
+          "measured_successes": 2028204,
+          "failures_by_phase_and_kind": {
+            "setup": {},
+            "holding": {},
+            "warmup": {
+              "timeout": 474
+            },
+            "measurement": {
+              "timeout": 5242
+            }
+          },
+          "failure_records": 5716,
+          "setup_unattempted": 0,
+          "partial_population_trials": 0,
+          "unexpected_server_exits": 0
+        },
+        "nic-samples-free": {
+          "passed": true,
+          "trials": 1,
+          "measured_successes": 2280318,
+          "failures_by_phase_and_kind": {
+            "setup": {},
+            "holding": {},
+            "warmup": {
+              "timeout": 192
+            },
+            "measurement": {
+              "timeout": 3446
+            }
+          },
+          "failure_records": 3638,
+          "setup_unattempted": 0,
+          "partial_population_trials": 0,
+          "unexpected_server_exits": 0
+        }
+      }
+    },
+    "docs/http2-diagnosis/build.json": {
+      "original_sha256": "7592b23e6f1f9980ac6230edac69c47756c1ef1804331e0b28d5d1adb9215f81",
+      "omitted_fields": {},
+      "record": {
+        "server_sha256": "1715b0030eb74bea4d67e3bff76b8152b4ba8b81f27254d7f18428be829a8aad",
+        "original_client_sha256": "80380f64f8b540cda333ed03835dbe8f8f60a72ff05dd8c289a503d44e17ed31",
+        "diagnostic_client_sha256": "c92c0ec053db260c239b8b37acf3d3c36898c17fe0522912eef865f18fc59407",
+        "diagnostic_build_command": "cd bench/http2_lan_client && CGO_ENABLED=0 GOPROXY=off GOCACHE=/tmp/zhtps-http2-go-cache go build -o ../../zig-out/http2-benchmark/diagnostic-client .",
+        "source_verification": [
+          "build.zig",
+          "build.zig.zon",
+          "src/Admission.zig",
+          "src/Config.zig",
+          "src/Logger.zig",
+          "src/Metrics.zig",
+          "src/Tls.zig",
+          "src/application/Exchange.zig",
+          "src/application.zig",
+          "src/endpoint/ResponseStream.zig",
+          "src/endpoint/Scratch.zig",
+          "src/endpoint/json.zig",
+          "src/endpoint/metrics.zig",
+          "src/endpoint/routing.zig",
+          "src/endpoint/server.zig",
+          "src/endpoint.zig",
+          "src/http/Parser.zig",
+          "src/http/Request.zig",
+          "src/http/Response.zig",
+          "src/http/conditions.zig",
+          "src/http/date.zig",
+          "src/http/path.zig",
+          "src/http/syntax.zig",
+          "src/http.zig",
+          "src/http2.zig",
+          "src/main.zig",
+          "src/metrics_format/json.zig",
+          "src/metrics_format/prometheus.zig",
+          "src/metrics_format.zig",
+          "src/platform.zig",
+          "src/root.zig",
+          "src/server/BufferPool.zig",
+          "src/server/Http2Allocator.zig",
+          "src/server/ResponseBatch.zig",
+          "src/server/http2.zig",
+          "src/server/worker.zig",
+          "src/server.zig",
+          "src/tls_openssl.h"
+        ]
+      }
+    },
+    "docs/http2-diagnosis/client-nic.json": {
+      "original_sha256": "1afe0c95ccd1e45cc807f156da7ffb36a9f8c6320c03876f4a3341a8447a3e0a",
+      "omitted_fields": {},
+      "record": {
+        "unix_ns": 1789418805448955046,
+        "hostname": "benchmark-client",
+        "interfaces": {
+          "client_eth0": {
+            "driver": "r8169",
+            "vendor": "0x10ec",
+            "device": "0x8125",
+            "queues": {
+              "queues/tx-0/xps_cpus": "FileNotFoundError(2, 'No such file or directory')",
+              "queues/tx-0/xps_rxqs": "0",
+              "queues/rx-0/rps_flow_cnt": "0",
+              "queues/rx-0/rps_cpus": "0000"
+            },
+            "irqs": {
+              "115": "7"
+            },
+            "speed": "2500",
+            "duplex": "full",
+            "carrier_changes": "4",
+            "carrier_up_count": "2",
+            "carrier_down_count": "2",
+            "rings": {
+              "rx_max": 256,
+              "rx_mini_max": 0,
+              "rx_jumbo_max": 0,
+              "tx_max": 256,
+              "rx_pending": 256,
+              "rx_mini_pending": 0,
+              "rx_jumbo_pending": 0,
+              "tx_pending": 256
+            },
+            "pause": {
+              "autoneg": 1,
+              "rx_pause": 0,
+              "tx_pause": 0
+            }
+          }
+        }
+      }
+    },
+    "docs/http2-diagnosis/manifest.json": {
+      "original_sha256": "70b5b11b472ff44c77c814fd8c0ffacb7c7f53295ab741a4487bf92761d86baa",
+      "omitted_fields": {},
+      "record": {
+        "audit.json": {
+          "sha256": "e11821109172ebd7dbdd2bac0ed020826b93c2fee97e253efe870a96d1b9d14f",
+          "bytes": 2953
+        },
+        "build.json": {
+          "sha256": "7592b23e6f1f9980ac6230edac69c47756c1ef1804331e0b28d5d1adb9215f81",
+          "bytes": 1543
+        },
+        "client-nic.json": {
+          "sha256": "1afe0c95ccd1e45cc807f156da7ffb36a9f8c6320c03876f4a3341a8447a3e0a",
+          "bytes": 925
+        },
+        "evidence.tar.gz": {
+          "sha256": "b25278e42c34ac0940886b43891aa04cdf1679be8eb874b33506b8aadc021c90",
+          "bytes": 9175545
+        },
+        "harness.tar.gz": {
+          "sha256": "abae7ebbee7b804411ca5b07ab8c2c71fb6a953859150980f5acfb47dfdc1b6a",
+          "bytes": 30967
+        },
+        "race.txt": {
+          "sha256": "1171d7d9a3aaac1c183753271c15d4e6e7fce3d99c9a65a6b2731aaa6f59a340",
+          "bytes": 424
+        },
+        "server-nic.json": {
+          "sha256": "96f4f5b31cba3c8b9f40f2377af59fe4b8901f2888be91fad39bccb3d02c9951",
+          "bytes": 932
+        },
+        "summary.json": {
+          "sha256": "e7bc97c4c4fc3cf781493ca2a7f65d7544ae5ce2b4d0db174829b76cc32cf2be",
+          "bytes": 1683342
+        },
+        "validation.txt": {
+          "sha256": "eeec97abc0b1161d11f4a33b832ecc951b357460fb99a24a9857565bf980b5ee",
+          "bytes": 815
+        }
+      }
+    },
+    "docs/http2-diagnosis/server-nic.json": {
+      "original_sha256": "96f4f5b31cba3c8b9f40f2377af59fe4b8901f2888be91fad39bccb3d02c9951",
+      "omitted_fields": {},
+      "record": {
+        "unix_ns": 1789418805148949447,
+        "hostname": "benchmark-server",
+        "interfaces": {
+          "server_eth0": {
+            "driver": "r8169",
+            "vendor": "0x10ec",
+            "device": "0x8126",
+            "queues": {
+              "queues/tx-0/xps_cpus": "FileNotFoundError(2, 'No such file or directory')",
+              "queues/tx-0/xps_rxqs": "0",
+              "queues/rx-0/rps_flow_cnt": "0",
+              "queues/rx-0/rps_cpus": "00000000"
+            },
+            "irqs": {
+              "103": "24"
+            },
+            "speed": "2500",
+            "duplex": "full",
+            "carrier_changes": "2",
+            "carrier_up_count": "1",
+            "carrier_down_count": "1",
+            "rings": {
+              "rx_max": 256,
+              "rx_mini_max": 0,
+              "rx_jumbo_max": 0,
+              "tx_max": 256,
+              "rx_pending": 256,
+              "rx_mini_pending": 0,
+              "rx_jumbo_pending": 0,
+              "tx_pending": 256
+            },
+            "pause": {
+              "autoneg": 1,
+              "rx_pause": 0,
+              "tx_pause": 0
+            }
+          }
+        }
+      }
+    },
+    "docs/http2-diagnosis/summary.json": {
+      "original_sha256": "e7bc97c4c4fc3cf781493ca2a7f65d7544ae5ce2b4d0db174829b76cc32cf2be",
+      "omitted_fields": {
+        "client_tcp_info_raw": 1,
+        "observations": 3
+      },
+      "record": {
+        "server_sha256": "1715b0030eb74bea4d67e3bff76b8152b4ba8b81f27254d7f18428be829a8aad",
+        "groups": [
+          {
+            "case": "baseline",
+            "trials": 3,
+            "instrumented_client": false,
+            "client_sha256": "80380f64f8b540cda333ed03835dbe8f8f60a72ff05dd8c289a503d44e17ed31",
+            "arguments": {
+              "client_host": "client.example",
+              "ssh_key": "/path/to/benchmark-key",
+              "address": "192.0.2.10",
+              "zhtps": "zig-out/http2-benchmark/bin/zhtps",
+              "go_server": "zig-out/http2-benchmark/go-server",
+              "client": "zig-out/http2-benchmark/lan-client",
+              "server_cpus": "0-7",
+              "client_cpus": "0-15",
+              "client_processes": 8,
+              "workers": "8",
+              "servers": "zhtps",
+              "connections": "16384",
+              "streams": 4,
+              "duration": 8,
+              "warmup": 2,
+              "timeout": 2,
+              "setup_deadline": 180,
+              "setup_concurrency": 32,
+              "repeats": 3,
+              "output": "/tmp/zhtps-http2-diagnose-baseline"
+            },
+            "median_rps": 206131.53822645237,
+            "rps_range": [
+              205580.31824826676,
+              207939.90722051056
+            ],
+            "median_p99_ms": 1300.0,
+            "measured_successes": 6155596,
+            "failures": {
+              "setup": 0,
+              "holding": 0,
+              "warmup": 1639,
+              "measurement": 15238
+            },
+            "measured_failures_by_trial": [
+              4883,
+              5200,
+              5155
+            ]
+          },
+          {
+            "case": "client7",
+            "trials": 3,
+            "instrumented_client": false,
+            "client_sha256": "80380f64f8b540cda333ed03835dbe8f8f60a72ff05dd8c289a503d44e17ed31",
+            "arguments": {
+              "client_host": "client.example",
+              "ssh_key": "/path/to/benchmark-key",
+              "address": "192.0.2.10",
+              "zhtps": "zig-out/http2-benchmark/bin/zhtps",
+              "go_server": "zig-out/http2-benchmark/go-server",
+              "client": "zig-out/http2-benchmark/lan-client",
+              "server_cpus": "0-7",
+              "client_cpus": "0-6,8-14",
+              "client_processes": 7,
+              "workers": "8",
+              "servers": "zhtps",
+              "connections": "16384",
+              "streams": 4,
+              "duration": 8,
+              "warmup": 2,
+              "timeout": 2,
+              "setup_deadline": 180,
+              "setup_concurrency": 32,
+              "repeats": 3,
+              "output": "/tmp/zhtps-http2-diagnose-client7"
+            },
+            "median_rps": 233744.71249735227,
+            "rps_range": [
+              230995.07213242882,
+              240375.9359273441
+            ],
+            "median_p99_ms": 1180.0,
+            "measured_successes": 6953159,
+            "failures": {
+              "setup": 0,
+              "holding": 0,
+              "warmup": 455,
+              "measurement": 7249
+            },
+            "measured_failures_by_trial": [
+              2346,
+              2251,
+              2652
+            ]
+          },
+          {
+            "case": "paired",
+            "trials": 1,
+            "instrumented_client": true,
+            "client_sha256": "c92c0ec053db260c239b8b37acf3d3c36898c17fe0522912eef865f18fc59407",
+            "arguments": {
+              "client_host": "client.example",
+              "ssh_key": "/path/to/benchmark-key",
+              "address": "192.0.2.10",
+              "zhtps": "zig-out/http2-benchmark/bin/zhtps",
+              "go_server": "zig-out/http2-benchmark/go-server",
+              "client": "zig-out/http2-benchmark/diagnostic-client",
+              "server_cpus": "0-7",
+              "client_cpus": "0-15",
+              "client_processes": 8,
+              "workers": "8",
+              "servers": "zhtps",
+              "connections": "16384",
+              "streams": 4,
+              "duration": 8,
+              "warmup": 2,
+              "timeout": 2,
+              "setup_deadline": 180,
+              "setup_concurrency": 32,
+              "repeats": 1,
+              "output": "/tmp/zhtps-http2-diagnose-paired"
+            },
+            "median_rps": 201156.79279852103,
+            "rps_range": [
+              201156.79279852103,
+              201156.79279852103
+            ],
+            "median_p99_ms": 1280.0,
+            "measured_successes": 1983583,
+            "failures": {
+              "setup": 0,
+              "holding": 0,
+              "warmup": 451,
+              "measurement": 3615
+            },
+            "measured_failures_by_trial": [
+              3615
+            ]
+          },
+          {
+            "case": "nic-busy7",
+            "trials": 3,
+            "instrumented_client": false,
+            "client_sha256": "80380f64f8b540cda333ed03835dbe8f8f60a72ff05dd8c289a503d44e17ed31",
+            "arguments": {
+              "client_host": "client.example",
+              "ssh_key": "/path/to/benchmark-key",
+              "address": "192.0.2.10",
+              "zhtps": "zig-out/http2-benchmark/bin/zhtps",
+              "go_server": "zig-out/http2-benchmark/go-server",
+              "client": "zig-out/http2-benchmark/lan-client",
+              "server_cpus": "0-7",
+              "client_cpus": "0-5,7,8-13,15",
+              "client_processes": 7,
+              "workers": "8",
+              "servers": "zhtps",
+              "connections": "16384",
+              "streams": 4,
+              "duration": 8,
+              "warmup": 2,
+              "timeout": 2,
+              "setup_deadline": 180,
+              "setup_concurrency": 32,
+              "repeats": 3,
+              "output": "/tmp/zhtps-http2-diagnose-nic-busy7"
+            },
+            "median_rps": 201947.16372512165,
+            "rps_range": [
+              198330.3373702427,
+              202201.63916151226
+            ],
+            "median_p99_ms": 1300.0,
+            "measured_successes": 5966631,
+            "failures": {
+              "setup": 0,
+              "holding": 0,
+              "warmup": 1412,
+              "measurement": 12754
+            },
+            "measured_failures_by_trial": [
+              4254,
+              3888,
+              4612
+            ]
+          },
+          {
+            "case": "nic-free7",
+            "trials": 3,
+            "instrumented_client": false,
+            "client_sha256": "80380f64f8b540cda333ed03835dbe8f8f60a72ff05dd8c289a503d44e17ed31",
+            "arguments": {
+              "client_host": "client.example",
+              "ssh_key": "/path/to/benchmark-key",
+              "address": "192.0.2.10",
+              "zhtps": "zig-out/http2-benchmark/bin/zhtps",
+              "go_server": "zig-out/http2-benchmark/go-server",
+              "client": "zig-out/http2-benchmark/lan-client",
+              "server_cpus": "0-7",
+              "client_cpus": "0-6,8-14",
+              "client_processes": 7,
+              "workers": "8",
+              "servers": "zhtps",
+              "connections": "16384",
+              "streams": 4,
+              "duration": 8,
+              "warmup": 2,
+              "timeout": 2,
+              "setup_deadline": 180,
+              "setup_concurrency": 32,
+              "repeats": 3,
+              "output": "/tmp/zhtps-http2-diagnose-nic-free7"
+            },
+            "median_rps": 222552.2600924939,
+            "rps_range": [
+              222083.0291424766,
+              223343.9087608025
+            ],
+            "median_p99_ms": 1220.0,
+            "measured_successes": 6647140,
+            "failures": {
+              "setup": 0,
+              "holding": 0,
+              "warmup": 561,
+              "measurement": 18319
+            },
+            "measured_failures_by_trial": [
+              5853,
+              5875,
+              6591
+            ]
+          },
+          {
+            "case": "loopback",
+            "trials": 3,
+            "instrumented_client": false,
+            "client_sha256": "80380f64f8b540cda333ed03835dbe8f8f60a72ff05dd8c289a503d44e17ed31",
+            "arguments": null,
+            "median_rps": 512753.6573000794,
+            "rps_range": [
+              504903.76315522427,
+              512773.323043719
+            ],
+            "median_p99_ms": 208.0,
+            "measured_successes": 12408653,
+            "failures": {
+              "setup": 0,
+              "holding": 0,
+              "warmup": 0,
+              "measurement": 0
+            },
+            "measured_failures_by_trial": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "case": "nic-samples",
+            "trials": 1,
+            "instrumented_client": true,
+            "client_sha256": "c92c0ec053db260c239b8b37acf3d3c36898c17fe0522912eef865f18fc59407",
+            "arguments": {
+              "client_host": "client.example",
+              "ssh_key": "/path/to/benchmark-key",
+              "address": "192.0.2.10",
+              "zhtps": "zig-out/http2-benchmark/bin/zhtps",
+              "go_server": "zig-out/http2-benchmark/go-server",
+              "client": "zig-out/http2-benchmark/diagnostic-client",
+              "server_cpus": "0-7",
+              "client_cpus": "0-15",
+              "client_processes": 8,
+              "workers": "8",
+              "servers": "zhtps",
+              "connections": "16384",
+              "streams": 4,
+              "duration": 8,
+              "warmup": 2,
+              "timeout": 2,
+              "setup_deadline": 180,
+              "setup_concurrency": 32,
+              "repeats": 1,
+              "output": "/tmp/zhtps-http2-diagnose-nic-samples"
+            },
+            "median_rps": 208302.8834409142,
+            "rps_range": [
+              208302.8834409142,
+              208302.8834409142
+            ],
+            "median_p99_ms": 1290.0,
+            "measured_successes": 2028204,
+            "failures": {
+              "setup": 0,
+              "holding": 0,
+              "warmup": 474,
+              "measurement": 5242
+            },
+            "measured_failures_by_trial": [
+              5242
+            ]
+          },
+          {
+            "case": "nic-samples-free",
+            "trials": 1,
+            "instrumented_client": true,
+            "client_sha256": "c92c0ec053db260c239b8b37acf3d3c36898c17fe0522912eef865f18fc59407",
+            "arguments": {
+              "client_host": "client.example",
+              "ssh_key": "/path/to/benchmark-key",
+              "address": "192.0.2.10",
+              "zhtps": "zig-out/http2-benchmark/bin/zhtps",
+              "go_server": "zig-out/http2-benchmark/go-server",
+              "client": "zig-out/http2-benchmark/diagnostic-client",
+              "server_cpus": "0-7",
+              "client_cpus": "0-6,8-14",
+              "client_processes": 7,
+              "workers": "8",
+              "servers": "zhtps",
+              "connections": "16384",
+              "streams": 4,
+              "duration": 8,
+              "warmup": 2,
+              "timeout": 2,
+              "setup_deadline": 180,
+              "setup_concurrency": 32,
+              "repeats": 1,
+              "output": "/tmp/zhtps-http2-diagnose-nic-samples-free"
+            },
+            "median_rps": 229949.82668103508,
+            "rps_range": [
+              229949.82668103508,
+              229949.82668103508
+            ],
+            "median_p99_ms": 1210.0,
+            "measured_successes": 2280318,
+            "failures": {
+              "setup": 0,
+              "holding": 0,
+              "warmup": 192,
+              "measurement": 3446
+            },
+            "measured_failures_by_trial": [
+              3446
+            ]
+          }
+        ],
+        "paired": [
+          {
+            "case": "paired",
+            "captured": 256,
+            "client_captured": 256,
+            "unpaired": [],
+            "counts": {
+              "waiting_headers": 256,
+              "observer_ack_timeout": 55,
+              "server_output_outstanding": 242,
+              "server_unread_zero": 238,
+              "server_unsent_zero": 162,
+              "server_timeout_retries_7plus": 134,
+              "client_unacked_zero": 166
+            },
+            "query_delay_ms": [
+              0.151572,
+              1.5490825,
+              52.672974
+            ],
+            "deadline_lateness_ms": [
+              0.004100999999991473,
+              0.03379799999993338,
+              5.86323799999991
+            ],
+            "request_written_ms": [
+              0.003757,
+              0.008431000000000001,
+              2.589963
+            ],
+            "nic": {}
+          },
+          {
+            "case": "nic-samples",
+            "captured": 256,
+            "client_captured": 256,
+            "unpaired": [],
+            "counts": {
+              "waiting_headers": 256,
+              "observer_ack_timeout": 52,
+              "server_output_outstanding": 238,
+              "server_unread_zero": 243,
+              "server_unsent_zero": 148,
+              "server_timeout_retries_7plus": 135,
+              "client_unacked_zero": 172
+            },
+            "query_delay_ms": [
+              0.047169,
+              0.37944500000000003,
+              3.337133
+            ],
+            "deadline_lateness_ms": [
+              0.004053000000112661,
+              0.04464600000005703,
+              39.6318940000001
+            ],
+            "request_written_ms": [
+              0.003536,
+              0.008785999999999999,
+              39.424876
+            ],
+            "nic": {
+              "server": {
+                "first_ns": 1789418617077379712,
+                "last_ns": 1789418626814670224,
+                "modulo_increment": 0,
+                "observed_wraps": 0,
+                "positive_intervals": 0,
+                "max_gap_ms": 6.650683,
+                "ambiguous_wrap_intervals": 0,
+                "assumption": "No counter reset. Extra wraps cannot be excluded in intervals exceeding the conservative line-rate bound.",
+                "samples": 1903
+              },
+              "client": {
+                "first_ns": 1789418617079177878,
+                "last_ns": 1789418626817103877,
+                "modulo_increment": 1710225,
+                "observed_wraps": 26,
+                "positive_intervals": 1552,
+                "max_gap_ms": 6.838474,
+                "ambiguous_wrap_intervals": 0,
+                "assumption": "No counter reset. Extra wraps cannot be excluded in intervals exceeding the conservative line-rate bound.",
+                "samples": 1852
+              }
+            }
+          },
+          {
+            "case": "nic-samples-free",
+            "captured": 223,
+            "client_captured": 224,
+            "unpaired": [
+              {
+                "capture_started_ns": 1789418699146877600,
+                "client": "192.0.2.20:45256",
+                "client_snapshot_ns": 1789418699146883071,
+                "failed_unix_ns": 1789418699146872710,
+                "http2": {
+                  "Closed": false,
+                  "Closing": false,
+                  "StreamsActive": 4,
+                  "StreamsReserved": 0,
+                  "StreamsPending": 0,
+                  "MaxConcurrentStreams": 100,
+                  "LastIdle": "0001-01-01T00:00:00Z"
+                },
+                "observer_attempts": 3,
+                "observer_error": "read udp4 192.0.2.20:46502->192.0.2.10:49473: i/o timeout",
+                "server": "192.0.2.10:53145",
+                "stage": "headers",
+                "wrote_request_ns": 1789418697146851582
+              }
+            ],
+            "counts": {
+              "waiting_headers": 223,
+              "observer_ack_timeout": 44,
+              "server_output_outstanding": 167,
+              "server_unread_zero": 212,
+              "server_unsent_zero": 164,
+              "server_timeout_retries_7plus": 37,
+              "client_unacked_zero": 111
+            },
+            "query_delay_ms": [
+              0.226298,
+              1.786495,
+              101.926273
+            ],
+            "deadline_lateness_ms": [
+              0.0038580000000365544,
+              0.023965000000089276,
+              2.3065110000000004
+            ],
+            "request_written_ms": [
+              0.003596,
+              0.008195,
+              0.842812
+            ],
+            "nic": {
+              "server": {
+                "first_ns": 1789418697120689924,
+                "last_ns": 1789418707039060205,
+                "modulo_increment": 222048,
+                "observed_wraps": 4,
+                "positive_intervals": 1086,
+                "max_gap_ms": 5.547576,
+                "ambiguous_wrap_intervals": 0,
+                "assumption": "No counter reset. Extra wraps cannot be excluded in intervals exceeding the conservative line-rate bound.",
+                "samples": 1937
+              },
+              "client": {
+                "first_ns": 1789418697122121232,
+                "last_ns": 1789418707040001594,
+                "modulo_increment": 1504888,
+                "observed_wraps": 23,
+                "positive_intervals": 1526,
+                "max_gap_ms": 14.941568,
+                "ambiguous_wrap_intervals": 1,
+                "assumption": "No counter reset. Extra wraps cannot be excluded in intervals exceeding the conservative line-rate bound.",
+                "samples": 1874
+              }
+            }
+          }
+        ],
+        "audit": {
+          "baseline": {
+            "passed": true,
+            "trials": 3,
+            "measured_successes": 6155596,
+            "failures_by_phase_and_kind": {
+              "setup": {},
+              "holding": {},
+              "warmup": {
+                "timeout": 1639
+              },
+              "measurement": {
+                "timeout": 15238
+              }
+            },
+            "failure_records": 16877,
+            "setup_unattempted": 0,
+            "partial_population_trials": 0,
+            "unexpected_server_exits": 0
+          },
+          "client7": {
+            "passed": true,
+            "trials": 3,
+            "measured_successes": 6953159,
+            "failures_by_phase_and_kind": {
+              "setup": {},
+              "holding": {},
+              "warmup": {
+                "timeout": 455
+              },
+              "measurement": {
+                "timeout": 7249
+              }
+            },
+            "failure_records": 7704,
+            "setup_unattempted": 0,
+            "partial_population_trials": 0,
+            "unexpected_server_exits": 0
+          },
+          "paired": {
+            "passed": true,
+            "trials": 1,
+            "measured_successes": 1983583,
+            "failures_by_phase_and_kind": {
+              "setup": {},
+              "holding": {},
+              "warmup": {
+                "timeout": 451
+              },
+              "measurement": {
+                "timeout": 3615
+              }
+            },
+            "failure_records": 4066,
+            "setup_unattempted": 0,
+            "partial_population_trials": 0,
+            "unexpected_server_exits": 0
+          },
+          "nic-busy7": {
+            "passed": true,
+            "trials": 3,
+            "measured_successes": 5966631,
+            "failures_by_phase_and_kind": {
+              "setup": {},
+              "holding": {},
+              "warmup": {
+                "timeout": 1412
+              },
+              "measurement": {
+                "timeout": 12754
+              }
+            },
+            "failure_records": 14166,
+            "setup_unattempted": 0,
+            "partial_population_trials": 0,
+            "unexpected_server_exits": 0
+          },
+          "nic-free7": {
+            "passed": true,
+            "trials": 3,
+            "measured_successes": 6647140,
+            "failures_by_phase_and_kind": {
+              "setup": {},
+              "holding": {},
+              "warmup": {
+                "timeout": 561
+              },
+              "measurement": {
+                "timeout": 18319
+              }
+            },
+            "failure_records": 18880,
+            "setup_unattempted": 0,
+            "partial_population_trials": 0,
+            "unexpected_server_exits": 0
+          },
+          "loopback": {
+            "passed": true,
+            "trials": 3,
+            "failure_records": 0
+          },
+          "nic-samples": {
+            "passed": true,
+            "trials": 1,
+            "measured_successes": 2028204,
+            "failures_by_phase_and_kind": {
+              "setup": {},
+              "holding": {},
+              "warmup": {
+                "timeout": 474
+              },
+              "measurement": {
+                "timeout": 5242
+              }
+            },
+            "failure_records": 5716,
+            "setup_unattempted": 0,
+            "partial_population_trials": 0,
+            "unexpected_server_exits": 0
+          },
+          "nic-samples-free": {
+            "passed": true,
+            "trials": 1,
+            "measured_successes": 2280318,
+            "failures_by_phase_and_kind": {
+              "setup": {},
+              "holding": {},
+              "warmup": {
+                "timeout": 192
+              },
+              "measurement": {
+                "timeout": 3446
+              }
+            },
+            "failure_records": 3638,
+            "setup_unattempted": 0,
+            "partial_population_trials": 0,
+            "unexpected_server_exits": 0
+          }
+        },
+        "total_trials": 18
+      }
+    }
+  }
+}

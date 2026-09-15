@@ -18,13 +18,23 @@ pub const Body = union(enum) {
     stream: ?u64,
 };
 
-pub const Error = std.Io.Writer.Error || error{
+pub const ValidationError = error{
     InvalidStatus,
     InvalidHeader,
     ReservedHeader,
     InvalidBody,
+};
+
+pub const Error = std.Io.Writer.Error || ValidationError || error{
     LengthMismatch,
     StreamRequiresEncoder,
+};
+
+pub const Framing = struct {
+    /// Null omits Content-Length, either because the length is unknown or because
+    /// this status prohibits framing fields. HEAD/304 retain representation length.
+    content_length: ?u64,
+    suppressed: bool,
 };
 
 pub const Encoder = struct {
@@ -36,9 +46,12 @@ pub const Encoder = struct {
         finished,
     },
     close: bool,
-
     /// Encodes one body fragment. HEAD and bodyless statuses suppress payload.
-    pub fn write(encoder: *Encoder, writer: *std.Io.Writer, bytes: []const u8) Error!void {
+    pub fn write(
+        encoder: *Encoder,
+        writer: *std.Io.Writer,
+        bytes: []const u8,
+    ) Error!void {
         switch (encoder.mode) {
             .fixed => |remaining| {
                 if (bytes.len > remaining) return error.LengthMismatch;
@@ -57,7 +70,7 @@ pub const Encoder = struct {
         }
     }
 
-    /// Finishes the body, asserting length by a recoverable error. The caller
+    /// Finishes the body, returning LengthMismatch for an incomplete fixed body. The caller
     /// must close the transport after any serialization or write failure.
     pub fn end(encoder: *Encoder, writer: *std.Io.Writer) Error!void {
         switch (encoder.mode) {
@@ -70,17 +83,24 @@ pub const Encoder = struct {
     }
 };
 
-/// Validates all field metadata before emitting bytes. `date` is an IMF-fixdate
-/// produced by `formatDate`. Status 101 and successful CONNECT require a tunnel
-/// implementation and cannot be serialized by this origin-server response API.
+/// Validates origin response metadata without serializing it. Borrows all fields
+/// and body bytes. Status 101 and successful CONNECT require a tunnel implementation
+/// and cannot be serialized by this origin-server response API.
 /// The application supplies fields required by its status and representation
 /// (for example Allow for 405 and WWW-Authenticate for 401), and valid semantic
 /// field values. This layer validates field syntax and owns transport framing.
-pub fn begin(response: Response, writer: *std.Io.Writer, request: *const http.Request, date: *const [29]u8) Error!Encoder {
+pub fn framing(
+    response: Response,
+    request: *const http.Request,
+) ValidationError!Framing {
     if (response.status < 100 or response.status > 599 or response.status == 101)
         return error.InvalidStatus;
     if (request.version == .http_1_0 and response.status < 200) return error.InvalidStatus;
-    const connect = std.mem.eql(u8, request.method, "CONNECT");
+    const connect = std.mem.eql(
+        u8,
+        request.method,
+        "CONNECT",
+    );
     if (connect and response.status >= 200 and response.status < 300) return error.InvalidStatus;
     for (response.headers) |field| {
         if (!syntax.isToken(field.name) or !syntax.isField(field.value)) return error.InvalidHeader;
@@ -101,10 +121,28 @@ pub fn begin(response: Response, writer: *std.Io.Writer, request: *const http.Re
     const no_body = prohibited_framing or response.status == 304 or response.status == 205;
     if ((informational or response.status == 204 or response.status == 205) and
         (length == null or length.? != 0)) return error.InvalidBody;
-    const head = std.mem.eql(u8, request.method, "HEAD");
+    return .{
+        .content_length = if (prohibited_framing) null else length,
+        .suppressed = no_body or std.mem.eql(
+            u8,
+            request.method,
+            "HEAD",
+        ),
+    };
+}
+
+/// Validates all field metadata before emitting bytes. `date` is an IMF-fixdate
+/// produced by `formatDate`. Response fields and body remain borrowed from the caller.
+pub fn begin(
+    response: Response,
+    writer: *std.Io.Writer,
+    request: *const http.Request,
+    date: *const [29]u8,
+) Error!Encoder {
+    const plan = try response.framing(request);
     const closing = response.close or !request.keep_alive or
-        (length == null and request.version == .http_1_0 and !head and !no_body);
-    const chunked = length == null and !no_body and !head and request.version == .http_1_1;
+        (plan.content_length == null and request.version == .http_1_0 and !plan.suppressed);
+    const chunked = plan.content_length == null and !plan.suppressed and request.version == .http_1_1;
     if (response.status == 200) {
         try writer.writeAll(if (request.version == .http_1_0)
             "HTTP/1.0 200 OK\r\nDate: "
@@ -119,19 +157,16 @@ pub fn begin(response: Response, writer: *std.Io.Writer, request: *const http.Re
     }
     try writer.writeAll(date);
     try writer.writeAll("\r\n");
-    if (!informational) {
+    if (response.status >= 200) {
         if (closing) {
             try writer.writeAll("Connection: close\r\n");
         } else if (request.version == .http_1_0) {
             try writer.writeAll("Connection: keep-alive\r\n");
         }
     }
-    if (!prohibited_framing) {
-        if (length) |len| {
-            // For 304, a provided length describes the selected representation.
-            try writer.print("Content-Length: {d}\r\n", .{len});
-        } else if (chunked) try writer.writeAll("Transfer-Encoding: chunked\r\n");
-    }
+    if (plan.content_length) |len| {
+        try writer.print("Content-Length: {d}\r\n", .{len});
+    } else if (chunked) try writer.writeAll("Transfer-Encoding: chunked\r\n");
     for (response.headers) |field| {
         try writer.writeAll(field.name);
         try writer.writeAll(": ");
@@ -140,24 +175,41 @@ pub fn begin(response: Response, writer: *std.Io.Writer, request: *const http.Re
     }
     try writer.writeAll("\r\n");
     return .{
-        .mode = if (head or no_body) .suppressed else if (length) |len| .{ .fixed = len } else if (chunked) .chunked else .closing,
+        .mode = if (plan.suppressed)
+            .suppressed
+        else if (plan.content_length) |len|
+            .{ .fixed = len }
+        else if (chunked)
+            .chunked
+        else
+            .closing,
         .close = closing,
     };
 }
 
 /// Writes a complete response whose body is already available. Returns whether
 /// the transport must be closed. Streaming responses use `begin` instead.
-pub fn write(response: Response, writer: *std.Io.Writer, request: *const http.Request, date: *const [29]u8) Error!bool {
+pub fn write(
+    response: Response,
+    writer: *std.Io.Writer,
+    request: *const http.Request,
+    date: *const [29]u8,
+) Error!bool {
     const bytes = switch (response.body) {
         .bytes => |bytes| bytes,
         .stream => return error.StreamRequiresEncoder,
     };
-    var encoder = try response.begin(writer, request, date);
+    var encoder = try response.begin(
+        writer,
+        request,
+        date,
+    );
     try encoder.write(writer, bytes);
     try encoder.end(writer);
     return encoder.close;
 }
 
+/// Returns a static reason phrase, or an empty string for an unlisted status.
 pub fn reason(status: u16) []const u8 {
     return switch (status) {
         100 => "Continue",
@@ -227,7 +279,7 @@ pub fn errorBody(status: u16) []const u8 {
 pub fn formatDate(seconds: u64, buffer: *[29]u8) void {
     std.debug.assert(seconds < (zeit.Time{ .year = 10000 }).instant().unixTimestamp());
     const time = zeit.instant(.{ .unix_timestamp = @intCast(seconds) }, &zeit.utc).time();
-    var writer = std.Io.Writer.fixed(buffer);
+    var writer: std.Io.Writer = .fixed(buffer);
     time.strftime(&writer, "%a, %d %b %Y %H:%M:%S GMT") catch unreachable;
     std.debug.assert(writer.buffered().len == buffer.len);
 }
@@ -235,50 +287,94 @@ pub fn formatDate(seconds: u64, buffer: *[29]u8) void {
 test "HEAD carries representation length without body and 204 has no framing fields" {
     const testing = std.testing;
     var buffer: [1024]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
+    var writer: std.Io.Writer = .fixed(&buffer);
     var date: [29]u8 = undefined;
     formatDate(0, &date);
     const response: Response = .{ .body = .{ .bytes = "hello" } };
-    _ = try response.write(&writer, &.{ .method = "HEAD" }, &date);
+    _ = try response.write(
+        &writer,
+        &.{ .method = "HEAD" },
+        &date,
+    );
     try testing.expectEqualStrings(
         "HTTP/1.1 200 OK\r\nDate: Thu, 01 Jan 1970 00:00:00 GMT\r\nContent-Length: 5\r\n\r\n",
         writer.buffered(),
     );
     writer = .fixed(&buffer);
-    _ = try (Response{ .status = 204 }).write(&writer, &.{ .method = "GET" }, &date);
-    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Content-Length") == null);
-    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Transfer-Encoding") == null);
+    _ = try (Response{ .status = 204 }).write(
+        &writer,
+        &.{ .method = "GET" },
+        &date,
+    );
+    try testing.expect(std.mem.indexOf(
+        u8,
+        writer.buffered(),
+        "Content-Length",
+    ) == null);
+    try testing.expect(std.mem.indexOf(
+        u8,
+        writer.buffered(),
+        "Transfer-Encoding",
+    ) == null);
 }
 
 test "streaming uses chunks in HTTP 1.1 and closure in HTTP 1.0" {
     const testing = std.testing;
     var buffer: [1024]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
+    var writer: std.Io.Writer = .fixed(&buffer);
     const date = "Thu, 01 Jan 1970 00:00:00 GMT";
     const response: Response = .{ .body = .{ .stream = null } };
-    var encoder = try response.begin(&writer, &.{ .method = "GET" }, date);
+    var encoder = try response.begin(
+        &writer,
+        &.{ .method = "GET" },
+        date,
+    );
     try encoder.write(&writer, "abc");
     try encoder.write(&writer, "");
     try encoder.end(&writer);
-    try testing.expect(std.mem.endsWith(u8, writer.buffered(), "\r\n\r\n3\r\nabc\r\n0\r\n\r\n"));
+    try testing.expect(std.mem.endsWith(
+        u8,
+        writer.buffered(),
+        "\r\n\r\n3\r\nabc\r\n0\r\n\r\n",
+    ));
     try testing.expect(!encoder.close);
     writer = .fixed(&buffer);
-    encoder = try response.begin(&writer, &.{ .method = "GET", .version = .http_1_0 }, date);
+    encoder = try response.begin(
+        &writer,
+        &.{ .method = "GET", .version = .http_1_0 },
+        date,
+    );
     try encoder.write(&writer, "abc");
     try encoder.end(&writer);
     try testing.expect(encoder.close);
-    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Transfer-Encoding") == null);
-    try testing.expect(std.mem.endsWith(u8, writer.buffered(), "\r\n\r\nabc"));
+    try testing.expect(std.mem.indexOf(
+        u8,
+        writer.buffered(),
+        "Transfer-Encoding",
+    ) == null);
+    try testing.expect(std.mem.endsWith(
+        u8,
+        writer.buffered(),
+        "\r\n\r\nabc",
+    ));
 }
 
 test "response rejects header injection before writing and enforces declared lengths" {
     var buffer: [1024]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
+    var writer: std.Io.Writer = .fixed(&buffer);
     const date = "Thu, 01 Jan 1970 00:00:00 GMT";
     const response: Response = .{ .headers = &.{.{ .name = "X-Test", .value = "a\r\nInjected: yes" }} };
-    try std.testing.expectError(error.InvalidHeader, response.begin(&writer, &.{}, date));
+    try std.testing.expectError(error.InvalidHeader, response.begin(
+        &writer,
+        &.{},
+        date,
+    ));
     try std.testing.expectEqual(@as(usize, 0), writer.buffered().len);
-    var encoder = try (Response{ .body = .{ .stream = 3 } }).begin(&writer, &.{}, date);
+    var encoder = try (Response{ .body = .{ .stream = 3 } }).begin(
+        &writer,
+        &.{},
+        date,
+    );
     try encoder.write(&writer, "ab");
     try std.testing.expectError(error.LengthMismatch, encoder.end(&writer));
     try std.testing.expectError(error.LengthMismatch, encoder.write(&writer, "cd"));
@@ -289,18 +385,34 @@ test "RFC informational responses reject HTTP 1.0 before writing" {
     var buffer: [1024]u8 = undefined;
     const date = "Thu, 01 Jan 1970 00:00:00 GMT";
     for (100..200) |status| {
-        var writer = std.Io.Writer.fixed(&buffer);
+        var writer: std.Io.Writer = .fixed(&buffer);
         try testing.expectError(error.InvalidStatus, (Response{ .status = @intCast(status) }).begin(
             &writer,
-            &.{ .method = "GET", .version = .http_1_0, .keep_alive = false },
+            &.{
+                .method = "GET",
+                .version = .http_1_0,
+                .keep_alive = false,
+            },
             date,
         ));
         try testing.expectEqual(@as(usize, 0), writer.buffered().len);
     }
-    var writer = std.Io.Writer.fixed(&buffer);
-    _ = try (Response{ .status = 103 }).write(&writer, &.{ .method = "GET" }, date);
-    try testing.expect(std.mem.startsWith(u8, writer.buffered(), "HTTP/1.1 103 Early Hints\r\n"));
-    try testing.expect(std.mem.indexOf(u8, writer.buffered(), "Content-Length") == null);
+    var writer: std.Io.Writer = .fixed(&buffer);
+    _ = try (Response{ .status = 103 }).write(
+        &writer,
+        &.{ .method = "GET" },
+        date,
+    );
+    try testing.expect(std.mem.startsWith(
+        u8,
+        writer.buffered(),
+        "HTTP/1.1 103 Early Hints\r\n",
+    ));
+    try testing.expect(std.mem.indexOf(
+        u8,
+        writer.buffered(),
+        "Content-Length",
+    ) == null);
 }
 
 test "HTTP Date formatting uses UTC across leap centuries and the year limit" {

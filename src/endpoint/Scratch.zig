@@ -30,9 +30,18 @@ pub fn allocator(scratch: *Scratch) Allocator {
     };
 }
 
-fn alloc(ptr: *anyopaque, len: usize, alignment: Alignment, _: usize) ?[*]u8 {
+fn alloc(
+    ptr: *anyopaque,
+    len: usize,
+    alignment: Alignment,
+    _: usize,
+) ?[*]u8 {
     const scratch: *Scratch = @ptrCast(@alignCast(ptr));
-    const address = std.math.add(usize, @intFromPtr(scratch.buffer.ptr), scratch.end_index) catch
+    const address = std.math.add(
+        usize,
+        @intFromPtr(scratch.buffer.ptr),
+        scratch.end_index,
+    ) catch
         return null;
     const mask = alignment.toByteUnits() - 1;
     const padding = (0 -% address) & mask;
@@ -65,10 +74,21 @@ fn remap(
     new_len: usize,
     return_address: usize,
 ) ?[*]u8 {
-    return if (resize(ptr, bytes, alignment, new_len, return_address)) bytes.ptr else null;
+    return if (resize(
+        ptr,
+        bytes,
+        alignment,
+        new_len,
+        return_address,
+    )) bytes.ptr else null;
 }
 
-fn free(ptr: *anyopaque, bytes: []u8, _: Alignment, _: usize) void {
+fn free(
+    ptr: *anyopaque,
+    bytes: []u8,
+    _: Alignment,
+    _: usize,
+) void {
     const scratch: *Scratch = @ptrCast(@alignCast(ptr));
     const start = scratch.offset(bytes);
     if (bytes.len == scratch.end_index - start) scratch.end_index = start;
@@ -93,7 +113,11 @@ test "scratch rejects wrapping allocation resize and remap without consuming cap
     const saved = scratch.end_index;
     const huge = std.math.maxInt(usize);
     try testing.expectError(error.OutOfMemory, gpa.alloc(u8, huge));
-    try testing.expectError(error.OutOfMemory, gpa.alignedAlloc(u8, .@"16", huge));
+    try testing.expectError(error.OutOfMemory, gpa.alignedAlloc(
+        u8,
+        .@"16",
+        huge,
+    ));
     try testing.expectError(error.OutOfMemory, gpa.alloc(u64, huge));
     try testing.expect(!gpa.resize(bytes, huge));
     try testing.expect(gpa.remap(bytes, huge) == null);
@@ -113,7 +137,11 @@ test "scratch accounts for alignment and reuses only the last allocation" {
     scratch.init(buffer[1..]);
     const gpa = scratch.allocator();
     const first = try gpa.dupe(u8, "first");
-    const aligned = try gpa.alignedAlloc(u8, .@"16", 16);
+    const aligned = try gpa.alignedAlloc(
+        u8,
+        .@"16",
+        16,
+    );
     try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 16);
     try testing.expectEqual(@as(usize, 31), scratch.end_index);
     try testing.expect(!gpa.resize(first, 6));
@@ -128,7 +156,11 @@ test "scratch accounts for alignment and reuses only the last allocation" {
     try testing.expectEqualStrings("first", first);
     const saved = scratch.end_index;
     const huge_alignment: Alignment = @enumFromInt(@bitSizeOf(usize) - 1);
-    try testing.expect(gpa.rawAlloc(1, huge_alignment, @returnAddress()) == null);
+    try testing.expect(gpa.rawAlloc(
+        1,
+        huge_alignment,
+        @returnAddress(),
+    ) == null);
     try testing.expectEqual(saved, scratch.end_index);
 }
 

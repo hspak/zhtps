@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="ZHTPS performance: Remote HTTP/2 comparisons with Go, Node and Bun at 64 to 16,384 connections, every request failure, earlier loopback and HTTP/1 LAN results, and retained run summaries.">
+  <title>ZHTPS — Performance investigation</title>
+  <style>
+    :root { --ink:#202b30; --muted:#586870; --green:#08695d; --line:#dce3df; --paper:#fff;
+      --wash:#f4f6f3; --amber:#986006; --blue:#416d9c; --red:#b44047; --gray:#adb6ba; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; scroll-padding-top:28px; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    a { color:var(--green); text-underline-offset:3px; }
+    a:hover { color:#003e36; }
+    button,select { font:inherit; }
+    :focus-visible { outline:3px solid var(--blue); outline-offset:4px; }
+    .skip { position:absolute; top:-100px; left:20px; z-index:5; padding:12px; background:white; }
+    .skip:focus { top:10px; }
+    aside { position:fixed; inset:0 auto 0 0; width:244px; padding:32px 22px; background:var(--wash); border-right:1px solid var(--line); overflow:auto; }
+    .brand { display:flex; align-items:center; gap:11px; font-size:21px; letter-spacing:.03em; font-weight:800; text-decoration:none; color:var(--ink); }
+    .brand-mark { display:grid; place-items:center; width:33px; height:33px; background:var(--green); color:white; font-size:18px; border-radius:8px; }
+    .nav-label,.eyebrow { text-transform:uppercase; font-size:11px; letter-spacing:.14em; font-weight:750; color:var(--muted); }
+    .nav-label { margin:30px 10px 8px; }
+    nav a { display:block; padding:6px 10px; border-radius:5px; font-size:12px; line-height:1.45; color:#435359; text-decoration:none; }
+    nav a:hover { background:#e6ede7; }
+    .nav-foot { font-size:11px; color:var(--muted); margin:28px 10px; }
+    main { margin-left:244px; padding:38px clamp(24px,4vw,70px) 60px; max-width:1500px; }
+    .topline { display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line); padding-bottom:20px; }
+    .tag { border:1px solid var(--line); border-radius:5px; padding:4px 9px; font-size:11px; color:var(--muted); }
+    .button { background:white; border:1px solid #becbc2; border-radius:6px; padding:7px 12px; cursor:pointer; color:var(--green); font-size:12px; font-weight:650; }
+    .button:hover { background:var(--wash); }
+    header { padding:37px 0 28px; }
+    h1 { font-size:clamp(36px,4.5vw,58px); letter-spacing:-.05em; line-height:1.07; margin:14px 0 20px; max-width:780px; font-weight:750; }
+    .lede { max-width:800px; font-size:18px; line-height:1.6; color:#4b5c62; margin-bottom:18px; }
+    .metadata { display:flex; flex-wrap:wrap; gap:7px 18px; color:var(--muted); font-size:12px; }
+    .cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border:1px solid var(--line); border-radius:9px; overflow:hidden; margin:6px 0 22px; }
+    .card { padding:23px; background:var(--wash); }
+    .card+.card { border-left:1px solid var(--line); }
+    .card-label { font-size:12px; color:var(--muted); }
+    .card-number { font-size:clamp(27px,3vw,38px); font-weight:730; letter-spacing:-.035em; line-height:1.4; color:var(--green); }
+    .card-note { font-size:12px; color:var(--muted); }
+    .finding { padding:16px 20px; background:#fff8e9; border-left:3px solid #c48729; font-size:14px; margin:0 0 36px; }
+    .finding strong { color:#794b07; }
+    section { margin-top:42px; }
+    h2 { font-size:27px; letter-spacing:-.025em; line-height:1.3; margin:0 0 15px; }
+    h3 { font-size:21px; letter-spacing:-.015em; line-height:1.4; margin:34px 0 14px; }
+    h4 { font-size:18px; margin-top:30px; }
+    .section-head { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+    .section-head p { margin:0; color:var(--muted); font-size:12px; }
+    .explorer { border:1px solid var(--line); border-radius:10px; padding:24px; margin-top:20px; }
+    .controls { display:grid; grid-template-columns:1.2fr 1fr .6fr; gap:16px; }
+    label { display:block; font-size:12px; font-weight:650; margin-bottom:5px; color:var(--muted); }
+    select { width:100%; min-width:0; padding:10px 30px 10px 12px; border:1px solid #c5d1c9; border-radius:6px; background:white; color:var(--ink); font-size:14px; }
+    .phase-caption { font-size:13px; margin:18px 0; color:var(--muted); }
+    .metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; padding:18px 0; border-block:1px solid var(--line); }
+    .metric-label { display:block; color:var(--muted); font-size:11px; }
+    .metric-value { font-size:23px; letter-spacing:-.025em; font-weight:700; font-variant-numeric:tabular-nums; }
+    .metric-value small { font-size:12px; font-weight:400; }
+    .outcomes-title { font-size:13px; font-weight:650; margin:20px 0 9px; }
+    .outcome-bar { display:flex; height:14px; width:100%; border-radius:3px; overflow:hidden; background:#eef1ee; }
+    .outcome-segment { height:100%; }
+    .outcome-legend { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:13px 0 17px; font-size:11px; }
+    .legend-label { display:flex; align-items:center; gap:6px; color:var(--muted); }
+    .swatch { display:inline-block; width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+    .legend-amount { font-weight:650; font-size:14px; font-variant-numeric:tabular-nums; }
+    .latency-notes { display:flex; flex-wrap:wrap; gap:8px 24px; font-size:12px; color:var(--muted); }
+    .explainer { font-size:12px; color:var(--muted); margin:18px 0 0; max-width:820px; }
+    .prose { font-size:15px; line-height:1.75; }
+    .prose p,.prose ul,.prose ol { max-width:880px; }
+    .prose p { margin:14px 0; }
+    .prose p:has(> img) { max-width:none; }
+    .prose li { padding-left:3px; margin:8px 0; }
+    .prose h2 { padding-top:28px; border-top:1px solid var(--line); }
+    .prose strong { font-weight:680; }
+    code { font-size:.85em; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; background:#eef2ee; padding:2px 5px; border-radius:3px; overflow-wrap:anywhere; }
+    pre { overflow:auto; background:#f3f5f2; padding:17px 20px; border:1px solid var(--line); border-radius:6px; line-height:1.65; }
+    pre code { padding:0; background:none; overflow-wrap:normal; }
+    .table-scroll { overflow-x:auto; margin:20px 0; border:1px solid var(--line); border-radius:7px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; line-height:1.55; }
+    th { background:#edf2ed; text-align:left; color:#43564b; font-weight:650; }
+    th,td { padding:11px 13px; border-bottom:1px solid var(--line); vertical-align:top; min-width:85px; }
+    th { min-width:105px; }
+    tbody tr:nth-child(even) { background:#f8faf7; }
+    tbody tr:last-child td { border-bottom:0; }
+    .prose img { display:block; max-width:100%; height:auto; margin:28px 0; border:1px solid var(--line); border-radius:8px; }
+    .archive { border:1px solid var(--line); border-radius:8px; margin:12px 0; scroll-margin-top:24px; }
+    .archive>summary { padding:16px 20px; font-weight:650; cursor:pointer; font-size:14px; background:var(--wash); border-radius:8px; }
+    .archive-body { padding:0 24px 24px; }
+    .archive-body h2 { border:0; font-size:24px; }
+    .archive-intro { color:var(--muted); font-size:14px; }
+    .downloads { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 18px; padding:18px; }
+    .downloads a { font:11px/1.5 ui-monospace,Consolas,monospace; overflow-wrap:anywhere; }
+    footer { border-top:1px solid var(--line); margin-top:40px; padding-top:18px; font-size:12px; color:var(--muted); }
+    input { font:inherit; width:100%; min-width:0; padding:10px 12px; border:1px solid #c5d1c9; border-radius:6px; background:white; color:var(--ink); }
+    .review-note { padding:16px 20px; border-left:3px solid var(--green); background:#eef6f1; font-size:14px; }
+    .jump-links { display:flex; flex-wrap:wrap; gap:8px; margin:22px 0; }
+    .jump-links a { padding:7px 12px; border:1px solid var(--line); border-radius:6px; text-decoration:none; font-size:13px; }
+    .report-group { margin-top:30px; }
+    .history-note { font-size:12px; border-left:2px solid #b8c6bd; padding:10px 14px; color:var(--muted); background:var(--wash); }
+    .filter-bar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin:18px 0; }
+    .filter-bar>div { flex:1; min-width:170px; }
+    .filter-bar .wide-filter { flex:2; }
+    .result-count { color:var(--muted); font-size:12px; }
+    .status { display:inline-block; border-radius:4px; padding:3px 7px; background:#eef2ee; color:#44534b; font-size:11px; font-weight:650; }
+    .observed_lead_with_separated_trial_ranges,.observed_lower_total { color:#0b5c42; background:#e8f3ed; }
+    .accepted_tradeoff { color:#28567e; background:#e8f1fa; }
+    .open_worse { color:#8c3338; background:#fbecee; }
+    .open_tie,.open_overlapping_trials { color:#805808; background:#fff5dd; }
+    .ledger td small { display:block; color:var(--muted); }
+    .ledger th { min-width:160px; }
+    .ledger tbody th { background:transparent; font-weight:550; }
+    .trial-values { margin-top:6px; max-width:220px; color:var(--muted); font-size:10px; }
+    .trial-values summary { cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+    .comparison-chart { margin:22px 0 10px; }
+    .chart-row { display:grid; grid-template-columns:180px 1fr; gap:16px; margin:22px 0; }
+    .chart-label { font-size:12px; font-weight:650; }
+    .bar-row { display:grid; grid-template-columns:44px 1fr 120px; gap:8px; align-items:center; margin-bottom:7px; font-size:12px; font-variant-numeric:tabular-nums; }
+    .bar-track { height:17px; background:#f0f3f0; border-radius:3px; }
+    .bar-fill { height:100%; min-width:0; border-radius:3px; }
+    .bar-fill.zhtps { background:var(--green); }
+    .bar-fill.go { background:var(--blue); }
+    .bar-fill.node { background:var(--amber); }
+    .bar-fill.bun { background:var(--red); }
+    .chart-value { text-align:right; }
+    .source-tools { margin-top:18px; }
+    .download-status { font-size:12px; color:var(--muted); min-height:1.6em; overflow-wrap:anywhere; }
+    @media (max-width:620px) { .chart-row { grid-template-columns:1fr; gap:5px; } .bar-row { grid-template-columns:39px 1fr 110px; } .filter-bar>div { min-width:100%; } }
+    @media print { .filter-bar,.jump-links,.source-tools,.chart-controls,.download-status { display:none !important; } .report-entry[hidden],.report-group[hidden],.ledger tr[hidden] { display:revert !important; } .bar-fill { print-color-adjust:exact; } #sources .downloads { display:none; } }
+    [hidden] { display:none !important; }
+    @media (max-width:1100px) { aside { width:205px; padding-inline:14px; } main { margin-left:205px; padding-inline:25px; } .card { padding:18px; } }
+    @media (max-width:800px) {
+      aside { position:static; width:100%; padding:15px 22px; border-right:0; border-bottom:1px solid var(--line); }
+      aside nav,aside .nav-foot { display:none; } main { margin:0; padding:22px; }
+      header { padding-top:24px; } .topline .tag { display:none; } h1 { font-size:40px; }
+    }
+    @media (max-width:520px) {
+      main { padding:18px; } h1 { font-size:35px; } .lede { font-size:16px; }
+      .cards { grid-template-columns:1fr; } .card { padding:14px 18px; }
+      .card+.card { border-left:0; border-top:1px solid var(--line); } .card-number { font-size:29px; }
+      .controls { grid-template-columns:1fr; } .explorer { padding:17px; }
+      .metrics,.outcome-legend { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+      .downloads { grid-template-columns:1fr; } .archive-body { padding-inline:14px; }
+    }
+    @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
+    @media print {
+      @page { margin:16mm; } aside,.topline,.skip,.controls { display:none; }
+      main { margin:0; padding:0; max-width:none; } body { font-size:11px; }
+      h1 { font-size:32px; } h2 { font-size:22px; } h3 { font-size:17px; }
+      .prose { font-size:11px; } .cards,.metrics,figure,tr { break-inside:avoid; }
+      .table-scroll,pre { overflow:visible; } pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+      th,td { min-width:0; padding:6px; } table { font-size:9px; }
+      a { color:inherit; } .archive-body { padding-inline:8px; }
+      .outcome-bar,.card,th,.finding { print-color-adjust:exact; }
+    }
+  </style>
+</head>
+<body id="top">
+  <a class="skip" href="#main">Skip to report</a>
+  <aside aria-label="Report navigation">
+    <a href="#top" class="brand"><span class="brand-mark" aria-hidden="true">Z</span> ZHTPS</a>
+    <nav>
+      <p class="nav-label">Performance report</p>
+      <a href="#top">Overview</a>
+      <a href="#http2-lan-results">HTTP/2 · remote client</a>
+      <a href="#http2-results">Earlier HTTP/2 · loopback</a>
+      <a href="#current-results">Retained HTTP/1 · LAN</a>
+      <a href="#ledger">All 90 comparisons</a>
+      @@NAVIGATION@@
+      <p class="nav-label">Complete report library</p>
+      @@ARCHIVE_NAVIGATION@@
+      <a href="#explore">Original overload explorer</a>
+      <a href="#sources">Reports and run summaries</a>
+    </nav>
+    <p class="nav-foot">Through September 14, 2026<br>HTTP/1 investigation archived<br>Offline edition · @@REPORT_COUNT@@ reports</p>
+  </aside>
+  <main id="main">
+    <div class="topline"><span class="eyebrow">Engineering / Benchmarks</span><span class="tag">HTTP/2 and HTTP/1 · two-host LAN</span><button class="button" id="print-report" type="button" hidden>Print / Save PDF</button></div>
+    <header>
+      <div class="eyebrow">The complete investigation</div>
+      <h1>ZHTPS performance.<br>Measured capacity.<br>Recorded failures.</h1>
+      <p class="lede">What changed in ZHTPS, how it compares with Go, Node and Bun over HTTP/2, and what the HTTP/1 LAN investigation established. Reports preserve summarized results, run descriptions, decisions, and limitations.</p>
+      <div class="metadata"><span>Through September 14, 2026</span><span>HTTP/1 retained: tcp-retries-v1</span><span>HTTP/1 Go: GOMAXPROCS=32 · normal GC</span><span>HTTP/2: equal server CPU budgets · 1 / 2 / 4 / 8</span></div>
+    </header>
+    <div class="jump-links"><a href="#http2-lan-results">Compare HTTP/2 with the remote client</a><a href="#http2-lan-failures">Inspect failure counts</a><a href="#current-results">Compare the retained HTTP/1 server</a><a href="#conclusions--changes-retained-and-what-each-actually-improved">See retained changes</a><a href="#conclusions--experiments-rejected-or-left-unchanged">See rejected experiments</a><a href="#archives">Read full technical reports</a></div>
+
+    @@HTTP2_LAN_SECTION@@
+
+    <section id="http2-results">
+      <div class="section-head"><h2>HTTP/2 · local loopback</h2><p>September 14, 2026 · 84 audited trials · 171,517,473 verified responses · zero errors</p></div>
+      <p class="finding"><strong>In this earlier run, client and server ran on the same machine.</strong> Clients were pinned to separate physical cores, with no server/client SMT overlap. These are TLS loopback measurements and do not measure LAN capacity. The eight-worker ZHTPS results may still be limited by the client.</p>
+      <p>TLS 1.3 <code>GET /</code>, a verified six-byte <code>ZHTPS\n</code> response, persistent connections, and closed-loop requests. Each result is the median of three eight-second trials after two seconds of concurrent warmup. ZHTPS uses ReleaseSafe; every server receives the same CPU budget for its worker count.</p>
+      <p>Bun leads the serial case, while ZHTPS and Bun are nearly tied on one multiplexed connection. ZHTPS leads both multi-connection cases and every measured comparison with Go. Node and Bun use the same <code>node:http2</code> fixture and run only in the one-worker comparison.</p>
+      <h3>One worker · ZHTPS, Go, Node and Bun</h3>
+      <div class="table-scroll ledger" tabindex="0" role="region" aria-label="HTTP/2 one-worker measurements"><table><caption>One server CPU · median requests/s, with p99 latency below each rate</caption><thead><tr><th scope="col">Connections × streams</th><th scope="col">ZHTPS</th><th scope="col">Go</th><th scope="col">Node</th><th scope="col">Bun</th></tr></thead><tbody>@@HTTP2_SINGLE@@</tbody></table></div>
+      <h3>Multiple workers · ZHTPS and Go</h3>
+      <div class="table-scroll ledger" tabindex="0" role="region" aria-label="HTTP/2 multi-worker measurements"><table><caption>Equal server CPU budgets · median requests/s, p99 latency and throughput ratio</caption><thead><tr><th scope="col">Workers / server CPUs</th><th scope="col">Connections × streams</th><th scope="col">ZHTPS</th><th scope="col">Go</th><th scope="col">ZHTPS / Go</th></tr></thead><tbody>@@HTTP2_MULTI@@</tbody></table></div>
+      <p class="explainer">Both multi-connection cases allow 256 requests in flight. Go uses GOMAXPROCS equal to the server CPU count. Server CPUs are 0 through workers−1; the client pool is 8–15 and 24–31 on the same 16-core Ryzen AI Max+ 395. Node's 64 × 4 p99 varied from 3.34 to 12.70 ms; eight-worker ZHTPS at 8 × 32 ranged from 810,382 to 907,071 requests/s. These observed ranges are not confidence intervals.</p>
+      <div class="explorer" id="http2-chart-panel" hidden>
+        <h3>Explore HTTP/2 measurements</h3>
+        <div class="filter-bar chart-controls"><div><label for="http2-workers">Server workers / CPU budget</label><select id="http2-workers"><option value="1">1 · ZHTPS, Go, Node and Bun</option><option value="2">2 · ZHTPS and Go</option><option value="4">4 · ZHTPS and Go</option><option value="8">8 · ZHTPS and Go</option></select></div><div><label for="http2-metric">Metric</label><select id="http2-metric"><option value="requests_per_second">Requests/s · higher is better</option><option value="p99_ms">p99 latency · lower is better</option><option value="server_cpu_us_per_request">Server CPU µs/request · lower is better</option></select></div></div>
+        <p id="http2-chart-caption" class="explainer"></p><div id="http2-chart" class="comparison-chart" aria-live="polite"></div>
+      </div>
+      <p><a href="#http2-comparison">Full HTTP/2 report, CPU costs, calibration, summarized results and original run commands →</a></p>
+    </section>
+
+    <section id="current-results">
+      <div class="section-head"><h2>Retained HTTP/1 · ZHTPS vs Go over the LAN</h2><p>48 audited runs · 3 rotated trials per server/workload</p></div>
+    <div class="cards" aria-label="Retained HTTP/1 LAN comparison findings">
+      <div class="card"><div class="card-label">High-load GET workloads</div><div class="card-number">4 of 4</div><div class="card-note">Higher goodput and lower p99 than Go<br>8k/16k offered and saturated</div></div>
+      <div class="card"><div class="card-label">16k GET read-timeout reduction vs Go</div><div class="card-number">99.65–99.92<span style="font-size:18px">%</span></div><div class="card-note">Counts across three trials per workload<br>Residual timeouts remain</div></div>
+      <div class="card"><div class="card-label">High-load GET process CPU / success</div><div class="card-number">81–87<span style="font-size:18px">% less</span></div><div class="card-note">Versus Go in the retained comparison<br>Excludes some host packet-processing work</div></div>
+    </div>
+    <p class="review-note"><strong>HTTP/1 final preference: higher p50 is acceptable for lower p99.</strong> Three retained GET p50 results are accepted tradeoffs. Other regressions and every exact tie remain open. The HTTP/1 investigation ended at the user's request; its historical next steps are not scheduled work.</p>
+      <p>These are the final retained GET results. Values are <strong>ZHTPS / Go</strong>; quantiles and rates are medians of trial metrics, while read timeouts total three trials. The full ledger below also includes lower offered loads, uploads, CPU, RSS and all failure categories.</p>
+      <div class="table-scroll"><table><caption>High-load GET · retained tcp-retries-v1 · ZHTPS / Go</caption><thead><tr><th scope="col">Workload</th><th scope="col">Valid responses/s</th><th scope="col">p50 ms</th><th scope="col">p99 ms</th><th scope="col">Read timeouts</th></tr></thead><tbody>@@CURRENT_ROWS@@</tbody></table></div>
+      <p class="explainer">GET uses 7 ZHTPS workers on CPUs 9–15, Go with GOMAXPROCS=32, a second physical load host on CPUs 0–7, and the original 2 s deadline. Successful-exchange quantiles exclude failures and generator queue waiting. <a href="#retained-retries">Exact method and uploads →</a></p>
+      <div class="explorer" id="current-chart-panel" hidden>
+        <div class="chart-controls"><label for="chart-metric">Compare a metric across the four high-load GET workloads</label><select id="chart-metric"><option value="p99_ms">p99 latency · lower is better</option><option value="p50_ms">p50 latency · higher accepted for lower p99</option><option value="goodput">Validated responses/s · higher is better</option><option value="cpu_us">Process CPU per valid response · lower is better</option><option value="rss_mib">Sampled server RSS · lower is better</option><option value="read_timeouts">Read timeouts · lower is better</option></select></div>
+        <p id="chart-caption" class="explainer"></p><div id="current-chart" class="comparison-chart" aria-live="polite"></div>
+      </div>
+      <details class="archive" id="ledger"><summary>All 90 comparisons — values, trial results and acceptance</summary><div class="archive-body">
+        <p class="archive-intro">45 favorable with separated trial ranges · 14 lower count totals · 5 favorable medians with overlapping ranges · 15 open ties · 3 accepted p50 tradeoffs · 8 remaining unfavorable comparisons. Separated ranges are observations, not confidence intervals. Accepted tradeoffs retain their original unfavorable p50 measurements.</p>
+        <div class="filter-bar" id="ledger-controls" hidden><div><label for="ledger-kind">Workload</label><select id="ledger-kind"><option value="">All workloads</option value="get">GET</option><option value="upload">Uploads</option></select></div><div><label for="ledger-status">Result</label><select id="ledger-status"><option value="">All results</option value="open_worse">Unfavorable · open</option><option value="accepted_tradeoff">Accepted p50 tradeoff</option><option value="open_tie">Tie · open</option><option value="open_overlapping_trials">Favorable median · overlap / open</option><option value="observed_lead_with_separated_trial_ranges">Favorable · separated ranges</option><option value="observed_lower_total">Lower count total</option></select></div><div><label for="ledger-search">Search measurements</label><input id="ledger-search" type="search" placeholder="e.g. 16k, p99, generator"></div></div>
+        <p id="ledger-count" class="result-count" aria-live="polite">90 comparisons</p>
+        <div class="table-scroll ledger"><table><caption>Retained comparison: medians for continuous metrics; summed counts for failures and generator misses. Δ = (ZHTPS / Go − 1) × 100%; direction depends on the metric.</caption><thead><tr><th scope="col">Workload</th><th scope="col">Metric / unit</th><th scope="col">ZHTPS</th><th scope="col">Go</th><th scope="col">Δ vs Go</th><th scope="col">Acceptance / observation</th></tr></thead><tbody id="ledger-rows">@@COMPARISONS@@</tbody></table></div>
+      </div></details>
+    </section>
+
+    <section id="conclusions" class="prose">@@REPORT@@</section>
+
+    <section id="archives">
+      <div class="section-head"><h2>Complete technical report library</h2><p>@@APPENDIX_COUNT@@ full reports and notes</p></div>
+      <p class="archive-intro">Reports retain their findings, tables, methodology, correctness checks, rejected candidates and caveats. Historical conclusions and planned next steps describe their original experiment; the overview above records final decisions. Compare configurations before comparing rates.</p>
+      <div class="filter-bar" id="report-controls" hidden><div class="wide-filter"><label for="report-search">Search titles and full report text</label><input id="report-search" type="search" placeholder="e.g. CRC32, idle reclamation, GOMAXPROCS"></div><button class="button" id="expand-reports" type="button">Expand matching reports</button><button class="button" id="collapse-reports" type="button">Collapse all</button><button class="button" id="clear-reports" type="button">Clear search</button></div>
+      <p id="report-count" class="result-count" aria-live="polite">All @@APPENDIX_COUNT@@ reports shown</p>
+      @@ARCHIVES@@
+    </section>
+
+    <section id="explore" hidden>
+      <div class="section-head"><h2>Original overload measurements</h2><p>Historical loopback / admission trials · separate from final LAN results</p></div>
+      <div class="explorer">
+        <div class="controls">
+          <div><label for="experiment">Experiment</label><select id="experiment"></select></div>
+          <div><label for="phase">Phase</label><select id="phase"></select></div>
+          <div><label for="percentile">Latency percentile</label><select id="percentile"><option value="p99">p99</option><option value="p999">p99.9</option><option value="p9999">p99.99</option><option value="max">Maximum</option></select></div>
+        </div>
+        <div id="phase-results" aria-live="polite" aria-atomic="true">
+          <p class="phase-caption" id="phase-caption"></p>
+          <div class="metrics">
+            <div><span class="metric-label">Successful goodput</span><span class="metric-value" id="goodput"></span></div>
+            <div><span class="metric-label" id="success-label">Success p99</span><span class="metric-value" id="success-latency"></span></div>
+            <div><span class="metric-label">Server core busy</span><span class="metric-value" id="cpu"></span></div>
+            <div><span class="metric-label">Server RSS, max</span><span class="metric-value" id="rss"></span></div>
+          </div>
+          <p class="outcomes-title">Outcomes of all scheduled offers</p>
+          <div class="outcome-bar" id="outcome-bar" aria-hidden="true"></div>
+          <div class="outcome-legend" id="outcome-legend"></div>
+          <div class="latency-notes"><span id="http-latency"></span><span id="transport-latency"></span><span id="phase-duration"></span></div>
+        </div>
+        <p class="explainer">Goodput counts validated successes completed inside the phase window. Outcome percentages and latency include the phase’s requests that finish later. Unsent offers never reached the socket. Core busy includes kernel work; for four workers it is the mean across their four assigned cores. Older runs did not record p99.9 or p99.99; those values are shown as “Not recorded.”</p>
+      </div>
+    </section>
+    <noscript><p>The complete report, tables, and chart below are readable without JavaScript. Enable JavaScript for phase comparison and summary downloads.</p></noscript>
+
+    <section id="sources">
+      <h2>Download reports and run summaries</h2>
+      <p class="archive-intro">@@SOURCE_COUNT@@ embedded files contain the reports, compact run catalogs, and summary tables and charts. Downloads restore these retained files; SHA-256 hashes appear on hover. Raw traces, binaries, profiles, and source snapshots have been removed. Historical artifact paths identify the original runs. Reports and charts work offline; source links require the repository checkout, and external references require internet access.</p>
+      <details class="archive" id="source-browser"><summary>Browse and download reports and summaries</summary><div class="archive-body source-tools" id="source-controls" hidden><label for="source-search">Filter summaries by path</label><input id="source-search" type="search" placeholder="e.g. adaptive-send-pacing, http2-lan.json"><p id="source-count" class="result-count" aria-live="polite">@@SOURCE_COUNT@@ files</p></div><div class="downloads">@@DOWNLOADS@@</div></details>
+      <p id="download-status" class="download-status" role="status"></p>
+    </section>
+    <footer>Compiled from the workspace's recorded reports without rerunning benchmarks. All units, caveats, methodology, and historical configurations are retained. Print expands all technical reports and trial values, including search-filtered results. Rebuild with <code>python3 bench/render_reports.py</code>.</footer>
+  </main>
+  <script type="application/json" id="measurements">@@EXPERIMENTS@@</script>
+  <script type="application/json" id="current-measurements">@@CHART@@</script>
+  <script type="application/json" id="http2-measurements">@@HTTP2_CHART@@</script>
+  <script type="application/json" id="http2-lan-measurements">@@HTTP2_LAN_CHART@@</script>
+  <script type="application/json" id="attachments">@@ATTACHMENTS@@</script>
+  <script>
+    const experiments = JSON.parse(document.getElementById('measurements').textContent);
+    const experiment = document.getElementById('experiment');
+    const phase = document.getElementById('phase');
+    const percentile = document.getElementById('percentile');
+    const number = (value, digits = 0) => new Intl.NumberFormat('en-US', {maximumFractionDigits:digits}).format(value);
+    const text = (id, value) => { document.getElementById(id).textContent = value; };
+    const latency = (row, kind) => {
+      if (row[`${kind}_latency_count`] === 0) return 'No observations';
+      const value = row[`${kind}_${percentile.value}_ms`];
+      return value == null ? 'Not recorded' : `${number(value, 2)} ms`;
+    };
+    const phaseName = label => ({warmup:'Warmup',baseline:'Baseline',overload_2x:'Nominal 2× overload',overload_5x:'Nominal 5× overload',overload_10x:'Nominal 10× overload',recovery_2x:'Recovery after 2×',recovery_5x:'Recovery after 5×',recovery_10x:'Recovery after 10×',recovery:'Recovery',baseline_500k:'500k/s step',baseline_1m:'1m/s step',overload_1_5m:'1.5m/s step'}[label] || label);
+    function renderPhase() {
+      const trial = experiments[Number(experiment.value)];
+      const selected = trial.phases[Number(phase.value)];
+      const quantile = percentile.selectedOptions[0].textContent.toLowerCase();
+      const attempts = selected.dial_attempts == null ? '' : ` · ${number(selected.dial_attempts / selected.seconds)} connection attempts/s`;
+      text('phase-caption', `${trial.note}${number(selected.offered_rate)} offers/s scheduled · ${number(selected.sent_rate)} requests/s written to sockets${attempts}`);
+      text('goodput', `${number(selected.goodput)} /s`);
+      text('success-label', `Success ${quantile}`);
+      text('success-latency', latency(selected, 'success'));
+      text('cpu', selected.server_core_busy_percent == null ? 'Not recorded' : `${number(selected.server_core_busy_percent, 2)}%`);
+      text('rss', selected.rss_max_mib == null ? 'Not recorded' : `${number(selected.rss_max_mib, 2)} MiB`);
+      text('http-latency', `HTTP failure ${quantile}: ${latency(selected, 'rejection')}`);
+      text('transport-latency', `Transport failure ${quantile}: ${latency(selected, 'failure')}`);
+      text('phase-duration', `Phase duration: ${number(selected.seconds)} seconds`);
+      const failures = Object.entries(selected.failures);
+      const http = failures.filter(([kind]) => kind.startsWith('http_')).reduce((n, [, count]) => n + count, 0);
+      const transport = failures.filter(([kind]) => !kind.startsWith('http_')).reduce((n, [, count]) => n + count, 0);
+      const outcomes = [['Successful',selected.successes,'var(--green)'], ['HTTP failures',http,'var(--amber)'], ['Transport failures',transport,'var(--red)'], ['Unsent',selected.unsent,'var(--gray)']];
+      const bar = document.getElementById('outcome-bar');
+      const legend = document.getElementById('outcome-legend');
+      bar.replaceChildren(); legend.replaceChildren();
+      for (const [label, count, color] of outcomes) {
+        const percent = 100 * count / selected.offered;
+        const segment = document.createElement('div');
+        segment.className = 'outcome-segment'; segment.style.width = `${percent}%`; segment.style.background = color;
+        bar.append(segment);
+        const entry = document.createElement('div');
+        const name = document.createElement('div'); name.className = 'legend-label';
+        const swatch = document.createElement('span'); swatch.className = 'swatch'; swatch.style.background = color;
+        name.append(swatch, document.createTextNode(label));
+        const amount = document.createElement('div'); amount.className = 'legend-amount';
+        amount.textContent = `${percent > 0 && percent < .001 ? '<0.001' : number(percent, 3)}%`;
+        const total = document.createElement('div'); total.textContent = `${number(count)} offers`;
+        entry.append(name, amount, total); legend.append(entry);
+      }
+    }
+    function chooseExperiment() {
+      const selected = experiments[Number(experiment.value)];
+      phase.replaceChildren(...selected.phases.map((item, index) => new Option(phaseName(item.label), index)));
+      phase.value = Math.max(0, selected.phases.findIndex(item => item.label.startsWith('overload')));
+      renderPhase();
+    }
+    experiment.replaceChildren(...experiments.map((item, index) => new Option(item.title, index)));
+    experiment.addEventListener('change', chooseExperiment);
+    phase.addEventListener('change', renderPhase);
+    percentile.addEventListener('change', renderPhase);
+    chooseExperiment();
+    document.getElementById('explore').hidden = false;
+    document.getElementById('print-report').hidden = false;
+    document.getElementById('print-report').addEventListener('click', () => window.print());
+
+    const chartMeasurements = JSON.parse(document.getElementById('current-measurements').textContent);
+    const chartMetric = document.getElementById('chart-metric');
+    const chartUnits = {p99_ms:'ms',p50_ms:'ms',goodput:'/s',cpu_us:'µs / success',rss_mib:'MiB',read_timeouts:'timeouts'};
+    function renderCurrentChart() {
+      const metric = chartMetric.value;
+      const maximum = Math.max(...chartMeasurements.flatMap(row => Object.values(row.metrics[metric])));
+      const container = document.getElementById('current-chart');
+      container.replaceChildren();
+      text('chart-caption', `${chartMetric.selectedOptions[0].textContent}. All bars share a zero-based scale within this metric. ${metric === 'read_timeouts' ? 'Counts total three trials; zero observed failures is not a guarantee.' : 'Values are medians of three trial metrics.'}`);
+      for (const row of chartMeasurements) {
+        const block = document.createElement('div'); block.className = 'chart-row';
+        const label = document.createElement('div'); label.className = 'chart-label'; label.textContent = row.label;
+        const bars = document.createElement('div');
+        for (const side of ['zhtps', 'go']) {
+          const value = row.metrics[metric][side];
+          const bar = document.createElement('div'); bar.className = 'bar-row';
+          const name = document.createElement('span'); name.textContent = side === 'go' ? 'Go' : 'ZHTPS';
+          const track = document.createElement('div'); track.className = 'bar-track'; track.setAttribute('aria-hidden', 'true');
+          const fill = document.createElement('div'); fill.className = `bar-fill ${side}`; fill.style.width = `${maximum ? 100 * value / maximum : 0}%`;
+          track.append(fill);
+          const amount = document.createElement('span'); amount.className = 'chart-value';
+          amount.textContent = `${number(value, metric === 'read_timeouts' || metric === 'goodput' ? 0 : 3)} ${chartUnits[metric]}`;
+          bar.append(name, track, amount); bars.append(bar);
+        }
+        block.append(label, bars); container.append(block);
+      }
+    }
+    chartMetric.addEventListener('change', renderCurrentChart);
+    renderCurrentChart(); document.getElementById('current-chart-panel').hidden = false;
+
+    const http2Measurements = JSON.parse(document.getElementById('http2-measurements').textContent);
+    const http2Workers = document.getElementById('http2-workers');
+    const http2Metric = document.getElementById('http2-metric');
+    const http2Names = {zhtps:'ZHTPS',go:'Go',node:'Node',bun:'Bun'};
+    const http2Units = {requests_per_second:'/s',p99_ms:'ms',server_cpu_us_per_request:'µs / request'};
+    function renderHttp2Chart() {
+      const workers = Number(http2Workers.value);
+      const metric = http2Metric.value;
+      const rows = http2Measurements.filter(row => row.workers === workers);
+      const maximum = Math.max(...rows.map(row => row[metric]));
+      const container = document.getElementById('http2-chart');
+      container.replaceChildren();
+      text('http2-chart-caption', `${http2Metric.selectedOptions[0].textContent}. ${workers} server CPU${workers === 1 ? '' : 's'}, local loopback clients. Medians of three trials; all bars share a zero-based scale. ${workers === 8 ? 'ZHTPS may still be client-limited.' : ''}`);
+      const cases = [...new Set(rows.map(row => `${row.connections} × ${row.streams}`))];
+      for (const workload of cases) {
+        const block = document.createElement('div'); block.className = 'chart-row';
+        const label = document.createElement('div'); label.className = 'chart-label';
+        label.textContent = `${workload} connections × streams`;
+        const bars = document.createElement('div');
+        for (const server of ['zhtps', 'go', 'node', 'bun']) {
+          const row = rows.find(row => row.server === server && `${row.connections} × ${row.streams}` === workload);
+          if (!row) continue;
+          const bar = document.createElement('div'); bar.className = 'bar-row';
+          const name = document.createElement('span'); name.textContent = http2Names[server];
+          const track = document.createElement('div'); track.className = 'bar-track'; track.setAttribute('aria-hidden', 'true');
+          const fill = document.createElement('div'); fill.className = `bar-fill ${server}`;
+          fill.style.width = `${maximum ? 100 * row[metric] / maximum : 0}%`;
+          track.append(fill);
+          const amount = document.createElement('span'); amount.className = 'chart-value';
+          amount.textContent = `${number(row[metric], metric === 'requests_per_second' ? 0 : 3)} ${http2Units[metric]}`;
+          bar.append(name, track, amount); bars.append(bar);
+        }
+        block.append(label, bars); container.append(block);
+      }
+    }
+    http2Workers.addEventListener('change', renderHttp2Chart);
+    http2Metric.addEventListener('change', renderHttp2Chart);
+    renderHttp2Chart(); document.getElementById('http2-chart-panel').hidden = false;
+
+    const lanMeasurements = JSON.parse(document.getElementById('http2-lan-measurements').textContent);
+    const lanWorkers = document.getElementById('http2-lan-workers');
+    const lanMetric = document.getElementById('http2-lan-metric');
+    function renderLanChart() {
+      const workers = Number(lanWorkers.value);
+      const metric = lanMetric.value;
+      const counts = metric.endsWith('_failed');
+      const rows = lanMeasurements.filter(row => row.workers === workers);
+      const maximum = Math.max(0, ...rows.map(row => row[metric] || 0));
+      const container = document.getElementById('http2-lan-chart');
+      const unit = metric === 'requests_per_second' ? '/s' : metric === 'p99_ms' ? 'ms' : 'failures';
+      container.replaceChildren();
+      text('http2-lan-chart-caption', `${lanMetric.selectedOptions[0].textContent}. ${workers} server CPU${workers === 1 ? '' : 's'}, remote clients on client.example, four streams per connection. ${counts ? 'Failure counts total all three trials.' : 'Medians of three trials; latency includes successes only.'} All bars share a zero-based scale. † marks a partial connection population; inspect ready counts and failures before comparing rates.`);
+      for (const connections of [64, 1024, 8192, 16384]) {
+        const block = document.createElement('div'); block.className = 'chart-row';
+        const label = document.createElement('div'); label.className = 'chart-label';
+        label.textContent = `${number(connections, 0)} requested connections × 4 streams`;
+        const bars = document.createElement('div');
+        for (const server of ['zhtps', 'go', 'node', 'bun']) {
+          const row = rows.find(row => row.server === server && row.connections === connections);
+          if (!row) continue;
+          const partial = row.full_population_trials !== row.trials;
+          const bar = document.createElement('div'); bar.className = 'bar-row';
+          bar.title = `Ready ${number(row.min_ready_connections, 0)}–${number(row.max_ready_connections, 0)} / ${number(connections, 0)}; measured failures ${number(row.measurement_failed, 0)} across ${row.trials} trials`;
+          const name = document.createElement('span'); name.textContent = http2Names[server] + (partial ? ' †' : '');
+          const track = document.createElement('div'); track.className = 'bar-track'; track.setAttribute('aria-hidden', 'true');
+          const fill = document.createElement('div'); fill.className = `bar-fill ${server}`;
+          fill.style.width = `${maximum ? 100 * (row[metric] || 0) / maximum : 0}%`;
+          if (partial) fill.style.opacity = '.55';
+          track.append(fill);
+          const amount = document.createElement('span'); amount.className = 'chart-value';
+          amount.textContent = row[metric] === null ? '—' : `${number(row[metric], metric === 'p99_ms' ? 3 : 0)} ${unit}`;
+          bar.append(name, track, amount); bars.append(bar);
+        }
+        block.append(label, bars); container.append(block);
+      }
+    }
+    lanWorkers.addEventListener('change', renderLanChart);
+    lanMetric.addEventListener('change', renderLanChart);
+    renderLanChart(); document.getElementById('http2-lan-chart-panel').hidden = false;
+
+    const ledgerRows = [...document.querySelectorAll('#ledger-rows tr')];
+    function filterLedger() {
+      const kind = document.getElementById('ledger-kind').value;
+      const status = document.getElementById('ledger-status').value;
+      const query = document.getElementById('ledger-search').value.trim().toLowerCase();
+      for (const row of ledgerRows) row.hidden = (kind && row.dataset.kind !== kind) || (status && row.dataset.status !== status) || !row.textContent.toLowerCase().includes(query);
+      text('ledger-count', `${ledgerRows.filter(row => !row.hidden).length} of ${ledgerRows.length} comparisons shown`);
+    }
+    for (const id of ['ledger-kind', 'ledger-status', 'ledger-search']) document.getElementById(id).addEventListener('input', filterLedger);
+    document.getElementById('ledger-controls').hidden = false;
+
+    const reportEntries = [...document.querySelectorAll('.report-entry')];
+    const reportGroups = [...document.querySelectorAll('.report-group')];
+    const reportSearch = document.getElementById('report-search');
+    const reportText = new Map(reportEntries.map(entry => [entry, entry.textContent.toLowerCase()]));
+    function filterReports() {
+      const words = reportSearch.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      for (const entry of reportEntries) entry.hidden = !words.every(word => reportText.get(entry).includes(word));
+      for (const group of reportGroups) group.hidden = ![...group.querySelectorAll('.report-entry')].some(entry => !entry.hidden);
+      text('report-count', `${reportEntries.filter(entry => !entry.hidden).length} of ${reportEntries.length} reports shown`);
+    }
+    reportSearch.addEventListener('input', filterReports);
+    document.getElementById('expand-reports').addEventListener('click', () => { for (const entry of reportEntries) if (!entry.hidden) entry.open = true; });
+    document.getElementById('collapse-reports').addEventListener('click', () => { for (const entry of reportEntries) entry.open = false; });
+    document.getElementById('clear-reports').addEventListener('click', () => { reportSearch.value = ''; filterReports(); reportSearch.focus(); });
+    document.getElementById('report-controls').hidden = false;
+
+    const sourceLinks = [...document.querySelectorAll('.downloads a[data-download]')];
+    const sourceSearch = document.getElementById('source-search');
+    function filterSources() {
+      const query = sourceSearch.value.trim().toLowerCase();
+      for (const link of sourceLinks) link.hidden = !link.dataset.download.toLowerCase().includes(query);
+      text('source-count', `${sourceLinks.filter(link => !link.hidden).length} of ${sourceLinks.length} files shown`);
+    }
+    sourceSearch.addEventListener('input', filterSources);
+    document.getElementById('source-controls').hidden = false;
+
+    let attachments;
+    document.addEventListener('click', async event => {
+      const folder = event.target.closest('a[data-source-prefix]');
+      if (folder) {
+        sourceSearch.value = folder.dataset.sourcePrefix; filterSources();
+        document.getElementById('source-browser').open = true;
+      }
+      const link = event.target.closest('a[data-download]');
+      if (!link) return;
+      event.preventDefault();
+      try {
+        attachments ??= JSON.parse(document.getElementById('attachments').textContent);
+        const source = attachments.files[link.dataset.download];
+        const payload = attachments.payloads[source.sha256];
+        text('download-status', `Preparing ${link.dataset.download}…`);
+        const bytes = Uint8Array.from(atob(payload.base64), character => character.charCodeAt(0));
+        let blob = new Blob([bytes], {type:'application/octet-stream'});
+        let filename = source.name;
+        if (payload.encoding === 'gzip') {
+          if ('DecompressionStream' in window) blob = await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).blob();
+          else filename += '.gz';
+        }
+        const url = URL.createObjectURL(blob);
+        const download = document.createElement('a'); download.href = url; download.download = filename;
+        document.body.append(download); download.click(); download.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        text('download-status', filename.endsWith('.gz') && filename !== source.name ? `Downloaded ${filename}; decompress it to restore the original bytes. This browser lacks built-in gzip decompression.` : `Downloaded ${filename} · ${number(source.bytes)} bytes · SHA-256 ${source.sha256}`);
+      } catch (error) {
+        text('download-status', `Could not prepare this download: ${error.message}`);
+      }
+    });
+    function openAnchor() {
+      const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      if (!target) return;
+      if (target.closest('.report-group') && reportSearch.value) { reportSearch.value = ''; filterReports(); }
+      for (let item = target; item; item = item.parentElement) if (item.tagName === 'DETAILS') item.open = true;
+      if (location.hash) target.scrollIntoView({behavior:'instant', block:'start'});
+    }
+    window.addEventListener('hashchange', openAnchor);
+    if (location.hash) openAnchor();
+    let printClosed = [];
+    window.addEventListener('beforeprint', () => {
+      printClosed = [...document.querySelectorAll('details:not([open])')];
+      for (const item of printClosed) item.open = true;
+    });
+    window.addEventListener('afterprint', () => { for (const item of printClosed) item.open = false; });
+  </script>
+</body>
+</html>
