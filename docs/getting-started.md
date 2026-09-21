@@ -110,4 +110,4 @@ these calls even on a capable kernel. Startup fails explicitly in that case.
 The current implementation does not silently switch to another I/O backend.
 
 Continue with [configuration and tuning](configuration.md), [observability](observability.md),
-or [embedding the library](embedding.md).
+[running with systemd](systemd.md), or [embedding the library](embedding.md).

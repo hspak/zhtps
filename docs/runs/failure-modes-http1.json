@@ -1,0 +1,2826 @@
+{
+  "baseline_commit": "2e7ae2b9b10bde67db9ea67a3d18ad8bd9fcbd3e",
+  "versions": {
+    "node": "v26.9.0",
+    "go": "go version go1.27.1-X:nodwarf5 linux/amd64",
+    "zig": "0.16.0"
+  },
+  "after_source_sha256": {
+    "src/http/Request.zig": "3f9a47432bf7cabf6fbf6a95549fc4c86968136d0a5d2b4df2cbd7fc913d7fa8",
+    "src/http2.zig": "56ca421c73c9d967658f2437fffded09bcf3a022b41b2fffc40e6c19f828a00b",
+    "src/server/http2.zig": "2f0d54c484ddedc29cd590dd4e4c7b854e1933c0e4d2c4003d5b78dad21ddff7",
+    "tests/http2.py": "1d8b261e8e2613a611a51cfaac00f5f9f2c381e34617ac2cd76c49931c3a0b34",
+    "tests/http1_comparison.py": "d449038c8cbb63eff49e5e3d69ec0c8bcd9f368dfde2c4685de473ebf9dba7dc",
+    "tests/http2_comparison.py": "9c7e1048161d63a7900afcf0712f72063e4c8209aad1676d56902bb641e4bb6f",
+    "tests/reference_http1.cjs": "0a310a0e17bd8b0fc6785d424efe078d2a5c9d9940adcaed0d195051edb9b280",
+    "tests/reference_http1.go": "c4b93aeabb729de991552b377bf5fde0c3e8c0e4b96692e6ea4fd599b81bf6d4",
+    "tests/reference_http2.cjs": "a33fd10920cd9c3838fe596117e0a251b6437659707ca5f90e8266f3a63a0a2e"
+  },
+  "cases": [
+    {
+      "name": "ordinary_get",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "8892a66a2023a78c616fe7e8d0138ba3bd668c0ff86d1e7daba53a894ae2f5d6",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "head",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 51,
+      "request_sha256": "7ffa9f68b21cf13fb4b572e07a8379705099dacbe32902ab343b07fe38789c93",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "version_1.0",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "543db2b3feee0e17ec894dde1bd71f45f14f75947919099412be20b6ae0d53f9",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "version_1.9",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "05aa271e8e6225b6f1fc2309fe0c419634cccff586dbe0ed10bdfe386cba9a9a",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "version_2.0",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "2316ed4b3f0568d3238f9e849594269f72308ac3019f678e7f6fcfc42414a75a",
+      "zhtps_before": {
+        "statuses": [
+          505
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          505
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          505
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "version_0.9",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "94a294e0c93e8bb0ff777ccafce0c24092ee5fc29b78de68c9dfb54d8c5b7933",
+      "zhtps_before": {
+        "statuses": [
+          505
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          505
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          505
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "version_01.1",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 51,
+      "request_sha256": "bbdb6af79775a46ae81096922b8b857fed941a77aaeb55d76359583ef663afad",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "version_1.10",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 51,
+      "request_sha256": "de6469592eed7bbf3c563b6c3af1301f9ee1803ebc732bdf9814c08144380518",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "tab_separator",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "20cf695dcb4ec1fdbffa3358020239103c85ffed8bd0256ff482759516dac796",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "double_space",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 51,
+      "request_sha256": "8bf3d806bbd507dd6bb0f3b7fcb1c5dfd5be42dc11635ee513b12f8725d178fa",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "lowercase_method",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "eb44e3c09f004c30b4f622acd3abae2287c96fc5c7bce76fdcda7ec1f237137f",
+      "zhtps_before": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "unknown_method",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 53,
+      "request_sha256": "4fe06c712d792cabd805949083c783d3ad867daec35f1f716e640a6ec389b0ab",
+      "zhtps_before": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "invalid_method",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 51,
+      "request_sha256": "597b0822293c0d3c8c9989769e6a22a4afee70f9d202eb590a00a95eb758daab",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "absolute_target",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 62,
+      "request_sha256": "00477596282c123fb6372e59dca52226faf96e73bad4856671a6bea42ddaf275",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "https_on_cleartext",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 63,
+      "request_sha256": "4c2751710a03f6992759bd77c4e77ebec17e0de9353d0002690a86f649985e03",
+      "zhtps_before": {
+        "statuses": [
+          421
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          421
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "bad_percent",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 53,
+      "request_sha256": "b13500ab9214221c18e7729b4e4d5034c62faf296a73384ec6814588e5720669",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "fragment_in_target",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 52,
+      "request_sha256": "41828cbc9a4b88d11cde7070ab2cbfb7501f95c63a38f85aa3ca1c5460ed9399",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "raw_non_ascii",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 51,
+      "request_sha256": "a5b41f5e1029df563a1b04918cc85f903e45f10880b904f948330b891892cb04",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "connect",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 62,
+      "request_sha256": "3f7385450bd6e60a74abbea42375482008b5a68fbf4f5868746fabecb4ad0019",
+      "zhtps_before": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "asterisk_get",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "22f078c403fc94c334fd95fe747fd9ad6e35769f21e78034a9c6db60d8561a4e",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "leading_crlf",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 52,
+      "request_sha256": "802979cc232171bdfcad0f5a1808e9dd7ebdde22a5ef04e231b5922596734031",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "nine_leading_crlf",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 68,
+      "request_sha256": "c0f3419d9e6d6db2b21730cd4d767606b32fb49b65592560e83cda1942893f01",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "bare_lf",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 46,
+      "request_sha256": "d7ce8ca24fd1bfacc799be23f453b03a7fc5d726642cfe17711d14d2a2d7012b",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "missing_host",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 37,
+      "request_sha256": "09f0b0c6748aa2c455a586ddc53f49a57f9c7a450a91d3b2efb19c98beaea9bd",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "empty_host",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 44,
+      "request_sha256": "c0b54a15ab127212afa4fbaa1af1952e6684d555502d680ed48b1db48c0ab35d",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "duplicate_host",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 55,
+      "request_sha256": "83af5d1a790135eff4c453d5caa44ca371a64d96d972a9cec95cbee1ab86e39e",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "host_space",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 48,
+      "request_sha256": "358d2ad45cd3963f33146521161699cea3a881a5553e68eb18eaa0684835c85b",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "host_bad_port",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 54,
+      "request_sha256": "6d75092fdf0bb4d34cf82f99d1fa3392d78c177dd298c5713873eac46bdfed3d",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "host_bad_ipv6",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "afd11bb5d4b9c2424574d77228006a5320eef561405fa370d4a5fa22bc821a66",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "host_userinfo",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 48,
+      "request_sha256": "70a555ae8a3ea25da73915642194a2f3b6e94b244bc6a83e9d774bf0c14f7461",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "header_space_before_colon",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 60,
+      "request_sha256": "8e1f8be1b68f814099aa0ede418d03012dd30fc41946441e1202df0720f633a2",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "obs_fold",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 63,
+      "request_sha256": "ac3c8893a82a24aca54b2e2233cc0b97568b47296501e07c86ada84ccf86ac54",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "header_nul",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 61,
+      "request_sha256": "306e6f3439d4de769d77c5b9867c7a57f8da5034713f6e3c1dc48229af356362",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "header_del",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 61,
+      "request_sha256": "57dc22e943b5c2453ce64be650e929d9bd8fd1916111f26de6dbca5138222db7",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "header_obs_text",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 59,
+      "request_sha256": "278f91892572ce184940c2a7ddedf7412baea5be2285baae2ddbfe9b015c8a87",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "empty_header_name",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 55,
+      "request_sha256": "b3d279282bb0ac828b1b513983e3e868a57ad2f12095adddcf49947bb3cba719",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "duplicate_cl_equal",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 88,
+      "request_sha256": "5d0bb88588e7331e519a5630e27b28b6f3b1a338e0e7fe5fb23bbc3e81156b81",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "duplicate_cl_different",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 88,
+      "request_sha256": "4a3c34bd7967dcb13c0ad03ce5789c489e1ba1a8eac41c5f7f28ea0266427bdc",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "cl_list",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 72,
+      "request_sha256": "eea76d51507a495f7538c76a912d1325289e1b8f157ecd2f91590cfc94fa6f66",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "cl_plus",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 70,
+      "request_sha256": "5589d3a4d07b89162b87381b4390c1bc320b49f4d22edc072cd115d933a5c088",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "cl_negative",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 70,
+      "request_sha256": "fd92687fad27127c905b83c8dbced5818b60899da5961fadec8e865a03575dfd",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "cl_hex",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 71,
+      "request_sha256": "9e887fdbb3c48043c1146a4a8543e5c4c7a3499d06bf040bcff1295c2ab5a084",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "cl_leading_zero",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 71,
+      "request_sha256": "ee640c9de990509aa5f9f9d2a89c8a1bd623753512da8c1cdd6e6d90578e3c2a",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "cl_empty",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 67,
+      "request_sha256": "5ddb9a44c3c1bb506d219715f184b5d89fc9b4c4e579a8c9601ade980dc2d9d5",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "cl_overflow",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 88,
+      "request_sha256": "90772b3fe029b114930e43a67e5a49d706d9da018e846cf762824d285255a4ed",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_and_cl",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 102,
+      "request_sha256": "046c00e2418f59c4c45e6c9b9d18388fcadc2d25a5ce2fe54b1aca3b07f9c173",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_unsupported",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 80,
+      "request_sha256": "0f4818e6361d3772b64c71110480e8d36bb3ff729628e146224861cbf78df997",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_before_chunked",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 89,
+      "request_sha256": "50837372618be11b2e41c1c103f632b770998e3d968eefb7f9c52f7d5599a2b6",
+      "zhtps_before": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_after_chunked",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 89,
+      "request_sha256": "73a4e570daca0e7dfaa3d1ec29ac42ba92b1f2a511a51faf183428446552d348",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_duplicate_chunked",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 92,
+      "request_sha256": "69c5f3bc388f0bd1f012ab2ce356f2d24056d1e4ea8a9b7da75ed7ad48dc13fe",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_parameter",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 87,
+      "request_sha256": "1cb0b172c161902fd23e182da1fa254ec82b6681831321e7a69a37124077795c",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_empty",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 75,
+      "request_sha256": "c6666c7b831613ac38f957a7a78040dc037cb34875898ad9faabf5a9688e9dbb",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_list_empty_members",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 86,
+      "request_sha256": "93743f70fea5bc67f55254d787406d89f14f46230183d33c290ed1c62f16fee5",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "te_repeated_empty_field",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 103,
+      "request_sha256": "43047f9d6085bca892a55ae2935d2bb12af60b61dc0144602a36613f6fa1b3cc",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          501
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "connection_invalid_token",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 70,
+      "request_sha256": "10099ac25fe218c3e3d8c0a52364cd929f3160028672380b282e8082840c212b",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "expect_unknown",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 69,
+      "request_sha256": "bcb37d9551de04f4e51182f8c71b659c0f98b0fb31802979572f683e597b7048",
+      "zhtps_before": {
+        "statuses": [
+          417
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          417
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          417
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          417
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "expect_empty",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 59,
+      "request_sha256": "5698341cd650356c03764d384a9f8eae2860750b73c202232ed702d3e0366277",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          417
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "ordinary_chunk",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 96,
+      "request_sha256": "2cecbff23f54646ef621c7357fc9fa657ace0cb81ff952dd27e0232019dcaa7c",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_extension",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 104,
+      "request_sha256": "0e6411502e7edf795ca8e222cc8d1d223452b2e5ebc3d327c9efb3063cea5f5d",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_quoted_extension",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 107,
+      "request_sha256": "a92845589b874db42ea14d2b6041db898926ab05c7ea79ec49ac6f9f100ec6ad",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_extension_whitespace",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 109,
+      "request_sha256": "025f283c1ad3a7df2e5d3bbda44f5eef3294ac613d98c99d7f3f5e9d894b6932",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_trailing_whitespace",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 97,
+      "request_sha256": "c1ee0f116f310f946429e53d1e00f9ca6248485a891a5fb91bafc9a32b643606",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_plus",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 97,
+      "request_sha256": "411a25a2635cad67fd9726e60fe8c71241fb13b2350dfb8468bbc803a740f2dd",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_hex_prefix",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 98,
+      "request_sha256": "fe1b6585454175eb61e0c8f1b0893412a286c885ea77e7251905b9323d1aa6e0",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_overflow",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 102,
+      "request_sha256": "5c324b5600839eb674f3d720c41be88e618f894fb7eba74c58e6af6c4ba1177a",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_invalid_extension",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 99,
+      "request_sha256": "e8987a7e113117f880048c7d53584e5773e352b81e7ae2753ab8c2bc6db443b4",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_bare_lf",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 92,
+      "request_sha256": "7fb6d25dfa72bb7a032f40e3b0cd8efccb72bc32e1c275807061777ae85b1498",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "chunk_bad_delimiter",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 96,
+      "request_sha256": "f2452ec36e9b3d2eb1cd7dee7d1569ccc10f559793209d9e1a034723562f1dd2",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "trailer",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 104,
+      "request_sha256": "6eb2324d6918703cfce2596af59a9c22e726f8bb1af01bf95a473e8d7a55beb9",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "trailer_content_length",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 107,
+      "request_sha256": "1460397c8d20ebeddd8fc56cd15ecd1eccad2682dec7cfc10a285d38316c4d9d",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "trailer_authorization",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 111,
+      "request_sha256": "ae11bc528b7bf366de8d8986d92f1c8475e6e1fa55ca07c1b3a8d9ad952433a6",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "trailer_obs_fold",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 102,
+      "request_sha256": "d75d9298f378c551a0847d6dd17190a3a51fc78f711f5aad5fdd204f1c7f8a19",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "expect_continue",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 99,
+      "request_sha256": "006fb5f811a40e187cfc0c810c9d50d37a77f3b44e450666c1895a5541542714",
+      "zhtps_before": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "expect_list",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 102,
+      "request_sha256": "0f640d7f8f73ecff95f768f09cf416a7d3ba64725f35ef970d043897855bf645",
+      "zhtps_before": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "expect_zero_body",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 96,
+      "request_sha256": "9807e1e173de1a0f606ed90b9a27c15d5fbe1f849e88fe728a3e2a4d70b38d4b",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          100,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "fixed_body",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 77,
+      "request_sha256": "325faf7c70aeea888840fa13b78f97c8b3ed1ed326e1c2019275dbe847dc2b4e",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "unframed_post",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 55,
+      "request_sha256": "010c5b005d1ef6afa5616db9a655fbd73bfcb8e3b1fb18385f5e4b7dd706e5ea",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "truncated_head",
+      "half_close": true,
+      "fragment": null,
+      "request_bytes": 25,
+      "request_sha256": "d7b5b473e495ae1fea53c352dc32344865196864c2031439ca60b163c617f3e5",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "truncated_fixed",
+      "half_close": true,
+      "fragment": null,
+      "request_bytes": 76,
+      "request_sha256": "8c0ab9da038e25538bec32a9ef984611f945a4b058c1d321d6ce2ba3814dc447",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "truncated_chunk",
+      "half_close": true,
+      "fragment": null,
+      "request_bytes": 88,
+      "request_sha256": "54e1ed876c58556ee7d3c7598230cbcf55afdde9d3e25829ce54572c7dbb3c26",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "truncated_trailer",
+      "half_close": true,
+      "fragment": null,
+      "request_bytes": 92,
+      "request_sha256": "35b0de5acdce14acd54eadd3c09fff15497bdbdac7b69d202b37bf0f74896b84",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "complete_half_close",
+      "half_close": true,
+      "fragment": null,
+      "request_bytes": 50,
+      "request_sha256": "8892a66a2023a78c616fe7e8d0138ba3bd668c0ff86d1e7daba53a894ae2f5d6",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "fragmented_chunk",
+      "half_close": false,
+      "fragment": 1,
+      "request_bytes": 96,
+      "request_sha256": "2cecbff23f54646ef621c7357fc9fa657ace0cb81ff952dd27e0232019dcaa7c",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "pipeline",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 81,
+      "request_sha256": "828fa974669becd205db1a4cc9e4bef2e2998c4cae9cc2e4e661b8e45b2d4b8b",
+      "zhtps_before": {
+        "statuses": [
+          200,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200,
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "pipeline_fixed_body",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 108,
+      "request_sha256": "e0868e7a53944eebf1b0ae0086f16ed1391e6e1b861d9c16a152532755a0ab80",
+      "zhtps_before": {
+        "statuses": [
+          200,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200,
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200,
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "pipeline_malformed_then_get",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 120,
+      "request_sha256": "55eca3a0ca41bb6bba958c8e5c43d936c644869ea782d87f953bdbfe019ddcbd",
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "pipeline_close_then_get",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 100,
+      "request_sha256": "05e52046c3d21cc5b05b2789f5fe6ca6d48184fb410ad54708f050328aa22f47",
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          400
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "header_count_129",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 818,
+      "request_sha256": "1cb034e04673d97f5664bf8c365cbf915f5bd0c8892875ad4508066a7be3c8d8",
+      "zhtps_before": {
+        "statuses": [
+          431
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          431
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "header_bytes_40k",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 40055,
+      "request_sha256": "62c62e84c7c941f31d5c73781d0b9d4d632808434c97f295a5504d73dfc7ecbf",
+      "zhtps_before": {
+        "statuses": [
+          431
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          431
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          431
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    },
+    {
+      "name": "target_bytes_9k",
+      "half_close": false,
+      "fragment": null,
+      "request_bytes": 9050,
+      "request_sha256": "f6cc41d78cbcb9a9a239d64840706527b1755eaf7baf53a8a160a103c383d631",
+      "zhtps_before": {
+        "statuses": [
+          414
+        ],
+        "terminal": "eof"
+      },
+      "zhtps_after": {
+        "statuses": [
+          414
+        ],
+        "terminal": "eof"
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "terminal": "eof"
+      }
+    }
+  ]
+}

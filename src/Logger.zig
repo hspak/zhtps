@@ -45,6 +45,7 @@ pub const Event = struct {
     event: []const u8,
     worker: u32 = 0,
     connection: ?u64 = null,
+    client_ip: ?[]const u8 = null,
     request: ?u64 = null,
     status: ?u16 = null,
     reason: ?[]const u8 = null,
@@ -106,6 +107,10 @@ fn writeRecord(record: Event, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     try writeJsonString(record.event, writer);
     try writer.print(",\"worker\":{d}", .{record.worker});
     if (record.connection) |value| try writer.print(",\"connection\":{d}", .{value});
+    if (record.client_ip) |value| {
+        try writer.writeAll(",\"client_ip\":");
+        try writeJsonString(value, writer);
+    }
     if (record.request) |value| try writer.print(",\"request\":{d}", .{value});
     if (record.status) |value| try writer.print(",\"status\":{d}", .{value});
     if (record.reason) |value| {

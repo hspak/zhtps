@@ -123,6 +123,10 @@ and deferred release, stream/connection flow control, 2 MiB streaming uploads,
 writer cancellation, bounded production at zero/limited window credit,
 producer errors and length mismatches, trailers, split cookies, header limits,
 resource exhaustion/recovery, `100-continue`, and graceful GOAWAY with TLS closure.
+Fatal-GOAWAY regressions keep an upload or response producer pending and verify
+prompt closure, producer cleanup, and reuse of application capacity. The
+[control-frame comparison](failure-modes-http2-control.md) records the matching
+Node/Go probes, protocol-policy decisions, and before/after evidence.
 Component tests inject every allocation failure through session initialization,
 complete request/body/response exchanges and metadata growth. Wire tests cover
 growing header/trailer arrays and byte buffers, cookie joining and long paths,

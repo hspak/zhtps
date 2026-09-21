@@ -99,8 +99,9 @@ class Running:
 
 
 class Client:
-    def __init__(self, port):
-        self.socket = socket.create_connection(("127.0.0.1", port), timeout=3)
+    def __init__(self, port, host="127.0.0.1", source_address=None):
+        self.socket = socket.create_connection((host, port), timeout=3,
+                                               source_address=source_address)
         self.buffer = b""
 
     def __enter__(self):
@@ -417,6 +418,46 @@ class WireTests(unittest.TestCase):
             self.assertEqual(metrics["counters"]["log_dropped_total"], 0)
         self.assertTrue(any(e["event"] == "listening" for e in server.events))
         self.assertFalse(any(e["event"] == "request_complete" for e in server.events))
+
+    def test_access_logs_include_socket_client_ip_for_ipv4_and_ipv6(self):
+        for host, source in (("127.0.0.1", "127.0.0.2"), ("::1", "::1")):
+            for batches in (0, 1):
+                with self.subTest(host=host, batches=batches), Running(
+                    "--address", host, "--response-batches", str(batches),
+                ) as server:
+                    with Client(server.port, host, (source, 0)) as client:
+                        client.send(b"GET / HTTP/1.1\r\nHost: local\r\n"
+                                    b"X-Forwarded-For: 198.51.100.1\r\n"
+                                    b"Forwarded: for=198.51.100.2\r\n\r\n" * 4)
+                        for _ in range(4):
+                            self.assertEqual(client.response()[0], 200)
+                    with Client(server.admin_port) as client:
+                        client.send(b"GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n")
+                        self.assertEqual(client.response()[0], 200)
+                    records = []
+                    deadline = time.monotonic() + 3
+                    while len(records) < 5 and time.monotonic() < deadline:
+                        records = [e for e in server.events if e["event"] == "request_complete"]
+                        time.sleep(.01)
+                    self.assertEqual(len(records), 5)
+                    self.assertEqual([e.get("client_ip") for e in records],
+                                     [source] * 4 + ["127.0.0.1"])
+
+    def test_access_logs_update_client_ip_when_reclaiming_a_connection_slot(self):
+        with Running("--max-connections", "1", "--idle-reclaim-ms", "5") as server:
+            with contextlib.ExitStack() as stack:
+                for source in ("127.0.0.2", "127.0.0.3", "127.0.0.4"):
+                    client = stack.enter_context(Client(server.port, source_address=(source, 0)))
+                    client.send(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n")
+                    self.assertEqual(client.response()[0], 200)
+                records = []
+                deadline = time.monotonic() + 3
+                while len(records) < 3 and time.monotonic() < deadline:
+                    records = [e for e in server.events if e["event"] == "request_complete"]
+                    time.sleep(.01)
+                self.assertEqual(len(records), 3)
+                self.assertEqual([e.get("client_ip") for e in records],
+                                 ["127.0.0.2", "127.0.0.3", "127.0.0.4"])
 
     def test_get_head_and_pipelining(self):
         with Client(self.server.port) as client:

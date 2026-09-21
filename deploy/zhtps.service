@@ -1,0 +1,43 @@
+[Unit]
+Description=ZHTPS HTTP server
+After=network.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=zhtps
+Group=zhtps
+EnvironmentFile=/etc/zhtps/zhtps.env
+ExecStart=/usr/local/bin/zhtps $ZHTPS_ARGS
+Restart=on-failure
+RestartSec=5s
+# Invalid command-line options require an operator to fix the configuration.
+RestartPreventExitStatus=2
+
+# Allow the default five-second graceful drain plus cancellation and cleanup.
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zhtps
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

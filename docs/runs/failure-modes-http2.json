@@ -1,0 +1,2669 @@
+{
+  "baseline_commit": "2e7ae2b9b10bde67db9ea67a3d18ad8bd9fcbd3e",
+  "versions": {
+    "node": "v26.9.0",
+    "go": "go version go1.27.1-X:nodwarf5 linux/amd64",
+    "zig": "0.16.0"
+  },
+  "after_source_sha256": {
+    "src/http/Request.zig": "3f9a47432bf7cabf6fbf6a95549fc4c86968136d0a5d2b4df2cbd7fc913d7fa8",
+    "src/http2.zig": "56ca421c73c9d967658f2437fffded09bcf3a022b41b2fffc40e6c19f828a00b",
+    "src/server/http2.zig": "2f0d54c484ddedc29cd590dd4e4c7b854e1933c0e4d2c4003d5b78dad21ddff7",
+    "tests/http2.py": "1d8b261e8e2613a611a51cfaac00f5f9f2c381e34617ac2cd76c49931c3a0b34",
+    "tests/http1_comparison.py": "d449038c8cbb63eff49e5e3d69ec0c8bcd9f368dfde2c4685de473ebf9dba7dc",
+    "tests/http2_comparison.py": "9c7e1048161d63a7900afcf0712f72063e4c8209aad1676d56902bb641e4bb6f",
+    "tests/reference_http1.cjs": "0a310a0e17bd8b0fc6785d424efe078d2a5c9d9940adcaed0d195051edb9b280",
+    "tests/reference_http1.go": "c4b93aeabb729de991552b377bf5fde0c3e8c0e4b96692e6ea4fd599b81bf6d4",
+    "tests/reference_http2.cjs": "a33fd10920cd9c3838fe596117e0a251b6437659707ca5f90e8266f3a63a0a2e"
+  },
+  "cases": [
+    {
+      "name": "ordinary_get",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "host_matches",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "host",
+          "localhost"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "host_mismatch",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "host",
+          "other"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "body": "400 Bad Request: the request syntax or parameters are invalid.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "body": "400 Bad Request: the request syntax or parameters are invalid.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "duplicate_host",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "host",
+          "localhost"
+        ],
+        [
+          "host",
+          "other"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "duplicate_authority",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          ":authority",
+          "other"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "unknown_pseudo",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          ":unknown",
+          "x"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "connection",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "connection",
+          "close"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "body": "request header \"Connection\" is not valid in HTTP/2\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "transfer_encoding",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "transfer-encoding",
+          "chunked"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "body": "request header \"Transfer-Encoding\" is not valid in HTTP/2\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "te_trailers",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "te",
+          "trailers"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "te_gzip",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "te",
+          "gzip"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "body": "request header \"TE\" may only be \"trailers\" in HTTP/2\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "uppercase_header",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "X-Foo",
+          "bar"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "header_nul",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "x-foo",
+          "a\u0000b"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "header_leading_space",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "x-foo",
+          " bar"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "header_trailing_space",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "x-foo",
+          "bar "
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "cl_plus",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "content-length",
+          "+0"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "cl_negative",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "content-length",
+          "-1"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "duplicate_cl",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "content-length",
+          "0"
+        ],
+        [
+          "content-length",
+          "0"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "cl_nonzero_ended",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "content-length",
+          "1"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "expect_unknown",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "expect",
+          "other"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          417
+        ],
+        "body": "417 Expectation Failed: the request expectation is unsupported.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          417
+        ],
+        "body": "417 Expectation Failed: the request expectation is unsupported.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          417
+        ],
+        "body": "",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "expect_empty",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "expect",
+          ""
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          417
+        ],
+        "body": "417 Expectation Failed: the request expectation is unsupported.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          417
+        ],
+        "body": "",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "expect_list",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "expect",
+          ", 100-continue,"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          417
+        ],
+        "body": "417 Expectation Failed: the request expectation is unsupported.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          417
+        ],
+        "body": "",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          100,
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "expect_duplicate_unknown",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "expect",
+          "100-continue"
+        ],
+        [
+          "expect",
+          "other"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          417
+        ],
+        "body": "417 Expectation Failed: the request expectation is unsupported.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          417
+        ],
+        "body": "",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          100,
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "empty_path",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          ""
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "relative_path",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "relative"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "absolute_path",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "https://localhost/"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "asterisk_get",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "*"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "path_fragment",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/#fragment"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "body": "400 Bad Request: the request syntax or parameters are invalid.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "body": "400 Bad Request: the request syntax or parameters are invalid.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "path_invalid_percent",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/%GG"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          400
+        ],
+        "body": "400 Bad Request: the request syntax or parameters are invalid.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          400
+        ],
+        "body": "400 Bad Request: the request syntax or parameters are invalid.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "path_nul",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/\u0000"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "query_only_path",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "?query"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "query_only_empty",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "?"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "missing_method",
+      "fields": [
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "missing_scheme",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "missing_authority",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":path",
+          "/"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "missing_path",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "host_without_authority",
+      "fields": [
+        [
+          ":method",
+          "GET"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":path",
+          "/"
+        ],
+        [
+          "host",
+          "localhost"
+        ]
+      ],
+      "body": null,
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "ZHTPS\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "fixed_body",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ],
+        [
+          "content-length",
+          "3"
+        ]
+      ],
+      "body": "abc",
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "cl_short_body",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ],
+        [
+          "content-length",
+          "5"
+        ]
+      ],
+      "body": "abc",
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          400
+        ],
+        "body": "body read error\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "cl_long_body",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ],
+        [
+          "content-length",
+          "2"
+        ]
+      ],
+      "body": "abc",
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": null,
+        "ended": false,
+        "neighbor": null,
+        "goaway": 2
+      },
+      "go": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "upload_expect_continue",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ],
+        [
+          "expect",
+          "100-continue"
+        ]
+      ],
+      "body": "abc",
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          100,
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          100,
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "upload_expect_list",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ],
+        [
+          "expect",
+          ", 100-continue,"
+        ]
+      ],
+      "body": "abc",
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          417
+        ],
+        "body": "417 Expectation Failed: the request expectation is unsupported.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          417
+        ],
+        "body": "",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          100,
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "upload_expect_empty",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ],
+        [
+          "expect",
+          ""
+        ]
+      ],
+      "body": "abc",
+      "trailers": null,
+      "zhtps_before": {
+        "statuses": [
+          417
+        ],
+        "body": "417 Expectation Failed: the request expectation is unsupported.\n",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          417
+        ],
+        "body": "",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "trailer_x-checksum",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ]
+      ],
+      "body": "abc",
+      "trailers": [
+        [
+          "x-checksum",
+          "0"
+        ]
+      ],
+      "zhtps_before": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "trailer_authorization",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ]
+      ],
+      "body": "abc",
+      "trailers": [
+        [
+          "authorization",
+          "0"
+        ]
+      ],
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "trailer_content-length",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ]
+      ],
+      "body": "abc",
+      "trailers": [
+        [
+          "content-length",
+          "0"
+        ]
+      ],
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    },
+    {
+      "name": "trailer_host",
+      "fields": [
+        [
+          ":method",
+          "POST"
+        ],
+        [
+          ":scheme",
+          "https"
+        ],
+        [
+          ":authority",
+          "localhost"
+        ],
+        [
+          ":path",
+          "/echo"
+        ]
+      ],
+      "body": "abc",
+      "trailers": [
+        [
+          "host",
+          "0"
+        ]
+      ],
+      "zhtps_before": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "zhtps_after": {
+        "statuses": [],
+        "body": "",
+        "reset": 1,
+        "ended": false,
+        "neighbor": 200
+      },
+      "node": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      },
+      "go": {
+        "statuses": [
+          200
+        ],
+        "body": "abc",
+        "reset": null,
+        "ended": true,
+        "neighbor": 200
+      }
+    }
+  ]
+}

@@ -60,6 +60,12 @@ output. `--no-access-log` skips per-response records while retaining metrics,
 startup, sampled rejection, shutdown, and explicitly requested debug events.
 Logs never contain request bodies or arbitrary headers.
 
+Access records include `client_ip`, the socket peer's IPv4 or IPv6 address without
+a port. The address is captured when the connection is accepted and accompanies
+HTTP/1 and HTTP/2 responses, including batched responses and aborted HTTP/2 streams.
+Behind a reverse proxy this is the proxy's IP; `Forwarded` and `X-Forwarded-For`
+headers do not override it.
+
 Startup emits `resources_resolved` at info level with every resolved resource
 budget, including derived admission counts and burst, plus the sizing sources.
 `worker_resources_resolved` records each worker's selected CPU and actual io_uring

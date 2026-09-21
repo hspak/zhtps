@@ -250,6 +250,9 @@ pub fn build(b: *std.Build) !void {
         }),
     });
     tls_wire.addArtifactArg(tls_application);
+    b.step("install-response-fixture", "Install the response comparison application").dependOn(
+        &b.addInstallArtifact(tls_application, .{}).step,
+    );
     const streaming_wire = b.addSystemCommand(&.{ "python3", "tests/response_streaming.py" });
     streaming_wire.addArtifactArg(tls_application);
     b.step(

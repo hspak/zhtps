@@ -3,6 +3,7 @@
 ## Guides
 
 - [Build and run](getting-started.md): requirements, standalone resources, HTTPS, and listeners.
+- [systemd service](systemd.md): installation, service configuration, TLS, and process limits.
 - [Dependency maintenance](dependencies.md): bundled OpenSSL/libnghttp2, system linking, and updates.
 - [Configuration and tuning](configuration.md): workers, lanes, CPU placement, and memory budgets.
 - [Runtime](runtime.md): admission, overload, I/O batching, deadlines, and graceful shutdown.
@@ -15,6 +16,8 @@
 
 - [HTTP conformance](conformance.md): HTTP/1 semantics, supported scope, and application responsibilities.
 - [HTTP/2](http2.md): multiplexing, flow control, stream budgets, and verification.
+- [Failure-mode comparison](failure-modes.md): request, response, lifecycle, and
+  HTTP/2 control-frame behavior compared with Node and Go.
 - [TLS](tls.md): TLS 1.3 policy, certificates, resumption, and transport lifetimes.
 - [Security review](security.md): defenses, regression evidence, and deployment boundaries.
 - [Direct-server admission](native-admission.md) and [NGINX ingress](ingress.md): deployment options.

@@ -35,6 +35,34 @@ fn defaultAuthority(buffer: *[64]u8, address: []const u8, port: u16, default_por
     return writer.buffered();
 }
 
+// Only IP listeners supply these addresses. The longest unscoped IPv6 literal
+// occupies 39 bytes; formatting omits the peer port and needs no I/O.
+fn formatClientIp(buffer: *[39]u8, address: *const linux.sockaddr.storage) []const u8 {
+    var writer: std.Io.Writer = .fixed(buffer);
+    switch (address.family) {
+        linux.AF.INET => {
+            const ip: *const linux.sockaddr.in = @ptrCast(address);
+            const bytes: [4]u8 = @bitCast(ip.addr);
+            writer.print("{d}.{d}.{d}.{d}", .{
+                bytes[0],
+                bytes[1],
+                bytes[2],
+                bytes[3],
+            }) catch unreachable;
+        },
+        linux.AF.INET6 => {
+            const ip: *const linux.sockaddr.in6 = @ptrCast(address);
+            const literal: std.Io.net.Ip6Address.Unresolved = .{
+                .bytes = ip.addr,
+                .interface_name = null,
+            };
+            literal.format(&writer) catch unreachable;
+        },
+        else => unreachable,
+    }
+    return writer.buffered();
+}
+
 fn cancelSync(ring: *linux.IoUring, user_data: u64) error{IoUringOperationUnsupported}!void {
     const registration: linux.io_uring_sync_cancel_reg = .{
         .addr = user_data,
@@ -122,6 +150,9 @@ pub fn Worker(comptime App: type) type {
         pending: usize = 0,
         accepting: bool = false,
         admin_accepting: bool = false,
+        // Each listener has at most one accept in flight. Public peer storage
+        // also stays unchanged while waiting_accept waits for a reclaimed slot.
+        accept_peers: [2]AcceptPeer = @splat(.{}),
         accept_retry_ns: u64 = 0,
         admin_retry_ns: u64 = 0,
         ticking: bool = false,
@@ -172,6 +203,11 @@ pub fn Worker(comptime App: type) type {
         };
 
         const no_log_owner = std.math.maxInt(u32);
+
+        const AcceptPeer = struct {
+            address: linux.sockaddr.storage = undefined,
+            address_len: linux.socklen_t = undefined,
+        };
 
         const Buffer = enum {
             head,
@@ -250,6 +286,8 @@ pub fn Worker(comptime App: type) type {
 
         const Connection = struct {
             fd: linux.fd_t = -1,
+            client_ip: [39]u8 = undefined,
+            client_ip_len: u8 = 0,
             tls: ?*Tls.Session = null,
             http2: ?*Http2 = null,
             next_free: ?usize = null,
@@ -1480,8 +1518,15 @@ pub fn Worker(comptime App: type) type {
             const kind: Kind = if (admin) .accept_admin else .accept;
             const fd = if (admin) self.admin_listener.fd else self.listener.fd;
             try self.ensureSubmission();
-            _ = self.ring.accept(control(kind), fd, null, null, linux.SOCK.CLOEXEC) catch
-                return error.IoUringResources;
+            const peer = &self.accept_peers[@intFromBool(admin)];
+            peer.address_len = @sizeOf(@TypeOf(peer.address));
+            _ = self.ring.accept(
+                control(kind),
+                fd,
+                if (self.config.access_log) @ptrCast(&peer.address) else null,
+                if (self.config.access_log) &peer.address_len else null,
+                linux.SOCK.CLOEXEC,
+            ) catch return error.IoUringResources;
             if (admin) self.admin_accepting = true else self.accepting = true;
             self.queued();
         }
@@ -1733,6 +1778,10 @@ pub fn Worker(comptime App: type) type {
             if (admin) self.admin_free = connection.next_free else self.public_free = connection.next_free;
             connection.next_free = null;
             connection.fd = fd;
+            connection.client_ip_len = if (self.config.access_log) @intCast(formatClientIp(
+                &connection.client_ip,
+                &self.accept_peers[@intFromBool(admin)].address,
+            ).len) else 0;
             connection.generation +%= 1;
             connection.phase = .reading;
             connection.requests = 0;
@@ -1920,6 +1969,7 @@ pub fn Worker(comptime App: type) type {
                     self.connections[index].generation,
                 ) & ~@as(u64, 255),
                 .request = stream.request_id,
+                .client_ip = self.connections[index].client_ip[0..self.connections[index].client_ip_len],
                 .status = if (stream.response) |response| response.status else null,
                 .method = stream.request.method,
                 .duration_ns = duration,
@@ -2036,8 +2086,14 @@ pub fn Worker(comptime App: type) type {
                 self.queued();
             }
             if (!session.closing and !connection.send_pending and session.pending_plaintext.len == 0 and
-                session.count == 0 and (session.draining or !session.engine.wantsRead()))
+                session.pending_frame.len == 0 and
+                (!session.engine.wantsRead() or (session.count == 0 and session.draining)))
             {
+                // A terminal protocol error stops engine input even with live
+                // streams. Cancel them after flushing GOAWAY; their ordinary
+                // deadlines must not retain a connection that cannot progress.
+                // Graceful GOAWAY keeps engine input enabled for accepted streams.
+                if (session.count != 0) session.abort();
                 session.closing = true;
                 tls.start(.shutdown);
                 return self.pumpHttp2(index);
@@ -3263,6 +3319,7 @@ pub fn Worker(comptime App: type) type {
                     .event = "request_complete",
                     .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
                     .request = response.request_id,
+                    .client_ip = connection.client_ip[0..connection.client_ip_len],
                     .status = response.status,
                     .method = response.method[0..response.method_len],
                     .duration_ns = duration,
@@ -3566,6 +3623,7 @@ pub fn Worker(comptime App: type) type {
                     .event = "request_complete",
                     .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
                     .request = connection.request_id,
+                    .client_ip = connection.client_ip[0..connection.client_ip_len],
                     .status = connection.response_status,
                     .method = connection.parser.request.method,
                     .duration_ns = duration,

@@ -64,6 +64,7 @@ pub fn Session(comptime Handler: type) type {
             defer c.nghttp2_session_callbacks_del(callbacks);
             c.nghttp2_session_callbacks_set_on_begin_headers_callback(callbacks, begin);
             c.nghttp2_session_callbacks_set_on_header_callback(callbacks, header);
+            c.nghttp2_session_callbacks_set_on_invalid_header_callback(callbacks, invalidHeader);
             c.nghttp2_session_callbacks_set_on_data_chunk_recv_callback(callbacks, body);
             c.nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks, frame);
             c.nghttp2_session_callbacks_set_on_stream_close_callback(callbacks, closed);
@@ -268,6 +269,21 @@ pub fn Session(comptime Handler: type) type {
                 value[0..value_len],
             ) catch |err| return self.failed(id, err);
             return 0;
+        }
+
+        fn invalidHeader(
+            _: ?*c.nghttp2_session,
+            _: [*c]const c.nghttp2_frame,
+            _: [*c]const u8,
+            _: usize,
+            _: [*c]const u8,
+            _: usize,
+            _: u8,
+            _: ?*anyopaque,
+        ) callconv(.c) c_int {
+            // The default discards malformed fields, potentially changing request
+            // semantics. nghttp2 resets only this stream with PROTOCOL_ERROR.
+            return c.NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
         }
 
         fn body(

@@ -156,6 +156,29 @@ class Http2Tests(unittest.TestCase):
         if body is not None:
             self.assertEqual(response["body"], body)
 
+    def test_access_logs_include_client_ip_for_completed_and_reset_streams(self):
+        with self.server() as server, Client(server.port, self.context) as client:
+            streams = [client.request(headers=[("x-forwarded-for", "198.51.100.1")])
+                       for _ in range(4)]
+            for stream in streams:
+                self.success(client.wait(stream), b"ZHTPS\n")
+            stream = client.request("/echo", method="POST", end=False)
+            client.synchronize()
+            client.h2.reset_stream(stream)
+            client.flush()
+            client.synchronize()
+            records = []
+            deadline = time.monotonic() + 3
+            while len(records) < 5 and time.monotonic() < deadline:
+                records = [e for e in server.events
+                           if e["event"] in ("request_complete", "request_aborted")]
+                time.sleep(.01)
+            self.assertEqual(len(records), 5)
+            self.assertEqual([e["event"] for e in records],
+                             ["request_complete"] * 4 + ["request_aborted"])
+            self.assertTrue(all(e["phase"] == "http2" for e in records))
+            self.assertEqual([e.get("client_ip") for e in records], ["127.0.0.1"] * 5)
+
     def test_alpn_multiplexed_responses_and_keepalive(self):
         with self.server() as server, Client(server.port, self.context) as client:
             streams = [client.request("/stream" if i % 2 else "/") for i in range(40)]
@@ -388,6 +411,76 @@ class Http2Tests(unittest.TestCase):
             self.assertTrue(response["ended"])
             self.success(client.wait(client.request()), b"ZHTPS\n")
 
+    def test_invalid_field_bytes_reset_stream_instead_of_discarding_fields(self):
+        fields = [
+            ("authorization", "a\x00b"), ("x-test", "a\rb"), ("x-test", "a\nb"),
+            ("x-test", "a\x01b"), ("x-test", "a\x7fb"), ("bad name", "value"),
+            ("x-test", " leading"), ("x-test", "trailing\t"),
+        ]
+        with self.server() as server, Client(server.port, self.context) as client:
+            client.h2.config.validate_outbound_headers = False
+            client.h2.config.normalize_outbound_headers = False
+            for field in fields:
+                with self.subTest(field=field):
+                    invalid = client.request(headers=[field])
+                    response = client.wait(invalid)
+                    self.assertEqual(response["reset"], 1)
+                    self.assertEqual(response["headers"], {})
+                    self.success(client.wait(client.request()), b"ZHTPS\n")
+
+    def test_invalid_trailer_bytes_reset_stream_instead_of_discarding_fields(self):
+        with self.server() as server, Client(server.port, self.context) as client:
+            client.h2.config.validate_outbound_headers = False
+            client.h2.config.normalize_outbound_headers = False
+            for field in (("x-checksum", "a\x00b"), ("bad name", "value"), ("x-checksum", " value")):
+                with self.subTest(field=field):
+                    invalid = client.request("/echo", "POST", end=False)
+                    client.upload(invalid, b"abc", end=False)
+                    client.h2.send_headers(invalid, [field], end_stream=True)
+                    client.flush()
+                    response = client.wait(invalid)
+                    self.assertEqual(response["reset"], 1)
+                    self.assertEqual(response["headers"], {})
+                    self.success(client.wait(client.request()), b"ZHTPS\n")
+
+    def test_expect_lists_and_repeated_fields_continue_before_upload(self):
+        for values in ((", 100-Continue,",), ("", "100-continue"), ("100-continue", "100-continue")):
+            with self.subTest(values=values), self.server() as server, Client(server.port, self.context) as client:
+                upload = client.request("/echo", "POST", [("expect", value) for value in values], end=False)
+                while not any(getattr(event, "stream_id", None) == upload and isinstance(
+                    event, (InformationalResponseReceived, ResponseReceived, StreamReset)
+                ) for event in client.events):
+                    client.receive()
+                informational = [event for event in client.events if isinstance(event, InformationalResponseReceived)
+                                 and event.stream_id == upload]
+                self.assertEqual(len(informational), 1)
+                self.assertEqual(dict(informational[0].headers)[":status"], "100")
+                client.upload(upload, b"abc")
+                self.success(client.wait(upload), b"abc")
+                self.success(client.wait(client.request()), b"ZHTPS\n")
+
+    def test_unknown_expectation_in_any_field_rejects_before_continue(self):
+        for values in (("100-continue", "other"), ("", "other"), ("100-continue, other",)):
+            with self.subTest(values=values), self.server() as server, Client(server.port, self.context) as client:
+                invalid = client.request("/echo", "POST", [("expect", value) for value in values], end=False)
+                # Complete input to expose implementations that examine only the first field.
+                client.upload(invalid, b"abc")
+                response = client.wait(invalid)
+                self.assertEqual(response["headers"].get(":status"), "417")
+                self.assertTrue(response["ended"])
+                self.assertFalse(any(isinstance(event, InformationalResponseReceived)
+                                     and event.stream_id == invalid for event in client.events))
+                self.success(client.wait(client.request()), b"ZHTPS\n")
+
+    def test_empty_expectation_is_ignored_without_continue(self):
+        with self.server() as server, Client(server.port, self.context) as client:
+            upload = client.request("/echo", "POST", [("expect", "")], end=False)
+            client.upload(upload, b"abc")
+            self.success(client.wait(upload), b"abc")
+            self.assertFalse(any(isinstance(event, InformationalResponseReceived)
+                                 and event.stream_id == upload for event in client.events))
+            self.success(client.wait(client.request()), b"ZHTPS\n")
+
     def test_worker_stream_limit_and_reset_reclaims_capacity(self):
         with self.server("--http2-worker-streams", "1") as server:
             with Client(server.port, self.context) as first, Client(server.port, self.context) as second:
@@ -543,6 +636,47 @@ class Http2Tests(unittest.TestCase):
             self.assertEqual(client.socket.recv(1), b"")
             server.process.wait(timeout=3)
             self.assertEqual(server.process.returncode, 0)
+
+    def assert_fatal_protocol_close(self, client):
+        # A seven-byte PING is a connection-level FRAME_SIZE_ERROR. Keep the
+        # client open so its own disconnect cannot release the server's work.
+        client.socket.sendall(b"\x00\x00\x07\x06\x00\x00\x00\x00\x00" + b"1234567")
+        deadline = time.monotonic() + 1
+        while True:
+            client.socket.settimeout(max(.001, deadline - time.monotonic()))
+            try:
+                client.receive()
+            except TimeoutError:
+                self.fail("fatal GOAWAY retained the connection until a stream deadline")
+            except (EOFError, ConnectionResetError, ssl.SSLEOFError):
+                break
+            self.assertLess(time.monotonic(), deadline)
+        self.assertTrue(any(code == 6 for _, code in client.goaways), client.goaways)
+
+    def test_fatal_protocol_error_closes_pending_upload_without_body_timeout(self):
+        with self.server("--body-timeout-ms", "5000", fixture=True) as server, Client(server.port, self.context) as client:
+            client.request("/lifecycle-echo", "POST", [("content-length", "3")], end=False)
+            client.synchronize()
+            self.assert_fatal_protocol_close(client)
+            with Client(server.port, self.context) as observer:
+                self.success(observer.wait(observer.request("/metadata")))
+
+    def test_fatal_protocol_error_cancels_waiting_producer(self):
+        with self.server(fixture=True) as server, Client(server.port, self.context) as client:
+            stream = client.request("/stream-cancel")
+            while not client.responses[stream]["body"]:
+                client.receive()
+            self.assert_fatal_protocol_close(client)
+            with Client(server.port, self.context) as observer:
+                deadline = time.monotonic() + 1
+                while True:
+                    response = observer.wait(observer.request("/inspect"))
+                    self.success(response)
+                    if json.loads(response["body"])["released"] == 1:
+                        break
+                    self.assertLess(time.monotonic(), deadline, "fatal error retained its producer")
+                    time.sleep(.005)
+                self.success(observer.wait(observer.request("/stream-empty")), b"")
 
     def test_streaming_upload_consumption_and_trailers(self):
         with self.server(fixture=True) as server, Client(server.port, self.context) as client:

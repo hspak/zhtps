@@ -143,6 +143,20 @@ class TlsTests(unittest.TestCase):
             client.send(REQUEST)
             self.assertEqual(client.response()[2], b"ZHTPS\n")
 
+    def test_access_logs_include_client_ip_over_tls(self):
+        with Running(*self.options) as server:
+            with self.client(server) as client:
+                client.send(REQUEST * 4)
+                for _ in range(4):
+                    self.assertEqual(client.response()[0], 200)
+                records = []
+                deadline = time.monotonic() + 3
+                while len(records) < 4 and time.monotonic() < deadline:
+                    records = [e for e in server.events if e["event"] == "request_complete"]
+                    time.sleep(.01)
+                self.assertEqual(len(records), 4)
+                self.assertEqual([e.get("client_ip") for e in records], ["127.0.0.1"] * 4)
+
     def test_pipeline_batches_across_tls_records(self):
         with Running(*self.options, "--max-connections", "1024", "--max-active", "1024") as server:
             with FragmentedClient(server.port, self.context) as client:

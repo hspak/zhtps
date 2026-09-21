@@ -26,7 +26,9 @@ body_follows: bool = false,
 keep_alive: bool = true,
 expect_continue: bool = false,
 
-pub const ParseError = error{
+pub const ExpectError = error{ExpectationUnsupported};
+
+pub const ParseError = ExpectError || error{
     InvalidRequestLine,
     InvalidMethod,
     InvalidTarget,
@@ -40,7 +42,6 @@ pub const ParseError = error{
     AmbiguousFraming,
     InvalidTransferEncoding,
     UnsupportedTransferCoding,
-    ExpectationUnsupported,
 };
 
 /// Parses a complete CRLF-delimited request head into caller-owned header slots.
@@ -107,13 +108,8 @@ pub fn parse(bytes: []const u8, slots: []http.Header) ParseError!Request {
                 if (syntax.eql(token, "keep-alive")) connection_keep_alive = true;
             }
         } else if (syntax.eql(header.name, "expect")) {
-            var expectations = std.mem.splitScalar(u8, header.value, ',');
-            while (expectations.next()) |part| {
-                const expectation = syntax.trim(part);
-                if (expectation.len == 0) continue;
-                if (!syntax.eql(expectation, "100-continue")) return error.ExpectationUnsupported;
-                request.expect_continue = v == .http_1_1;
-            }
+            const expect_continue = try parseExpect(header.value);
+            request.expect_continue = request.expect_continue or (v == .http_1_1 and expect_continue);
         }
     }
     if (!terminated) return error.InvalidHeader;
@@ -126,6 +122,21 @@ pub fn parse(bytes: []const u8, slots: []http.Header) ParseError!Request {
     if (unsupported_coding) return error.UnsupportedTransferCoding;
     request.keep_alive = !connection_close and (v == .http_1_1 or connection_keep_alive);
     return request;
+}
+
+/// Validates one Expect field, ignoring empty list members. Returns true if it
+/// contains 100-continue, or ExpectationUnsupported for any other expectation.
+/// Call for every repeated field before deciding whether to send 100 Continue.
+pub fn parseExpect(value: []const u8) ExpectError!bool {
+    var expect_continue = false;
+    var expectations = std.mem.splitScalar(u8, value, ',');
+    while (expectations.next()) |part| {
+        const expectation = syntax.trim(part);
+        if (expectation.len == 0) continue;
+        if (!syntax.eql(expectation, "100-continue")) return error.ExpectationUnsupported;
+        expect_continue = true;
+    }
+    return expect_continue;
 }
 
 /// Parses one field line without CRLF. Returned name and value borrow line.

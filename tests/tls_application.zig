@@ -68,7 +68,24 @@ const api = struct {
         zhtps.get("/response-count", responseCount),
         zhtps.get("/response-budget", responseBudget),
         zhtps.get("/response-uppercase", responseUppercase),
+        zhtps.get("/response-case", responseCase),
         zhtps.get("/large", large),
+        zhtps.get("/lifecycle-delay", slow),
+        zhtps.endpoint(.{
+            .method = .post,
+            .path = "/lifecycle-echo",
+            .handler = lifecycleEcho,
+            .body = .bytes,
+            .max_body_bytes = 32 * 1024,
+        }),
+        zhtps.endpoint(.{
+            .method = .post,
+            .path = "/lifecycle-early",
+            .handler = lifecycleEcho,
+            .before = &.{lifecycleEarly},
+            .body = .bytes,
+            .max_body_bytes = 32 * 1024,
+        }),
         zhtps.get("/hold", hold),
         zhtps.get("/cancel", cancel),
         zhtps.endpoint(.{
@@ -189,6 +206,14 @@ const api = struct {
         return call.text(.ok, "0123456789abcdef" ** (512 * 1024));
     }
 
+    fn lifecycleEcho(call: *C) !zhtps.http.Response {
+        return call.text(.ok, call.bodyBytes());
+    }
+
+    fn lifecycleEarly(call: *C) C.HandlerError!?zhtps.http.Response {
+        return call.text(.forbidden, "denied");
+    }
+
     fn headers(call: *C) !zhtps.http.Response {
         return call.json(.ok, .{ .cookie = call.header("cookie"), .chunked = call.request.chunked });
     }
@@ -246,6 +271,72 @@ const api = struct {
             };
         }
         return .{ .headers = fields, .body = .{ .bytes = "ok" } };
+    }
+
+    fn responseCase(call: *C) !zhtps.http.Response {
+        const name = call.request.query;
+        if (std.mem.eql(u8, name, "panic-before")) @panic("response comparison panic");
+        if (std.mem.eql(u8, name, "handler-error")) return error.InputOutput;
+        if (std.mem.startsWith(u8, name, "stream") or std.mem.eql(u8, name, "panic-after")) {
+            const length: ?u64 = if (std.mem.eql(u8, name, "stream-short")) 9 else if (std.mem.eql(
+                u8,
+                name,
+                "stream-long",
+            )) 2 else if (std.mem.eql(u8, name, "stream-exact") or
+                std.mem.eql(u8, name, "stream-error-exact")) 3 else null;
+            return call.stream(.{
+                .length = length,
+                .headers = if (std.mem.eql(u8, name, "stream-trailer"))
+                    &.{.{ .name = "trailer", .value = "x-checksum" }}
+                else
+                    &.{},
+            }, comparisonStream);
+        }
+        if (std.mem.startsWith(u8, name, "status-")) {
+            const code = std.fmt.parseInt(u16, name[7..], 10) catch return error.InvalidInput;
+            return .{ .status = code, .body = .{ .bytes = if (code == 304) "abc" else "" } };
+        }
+        if (std.mem.eql(u8, name, "body-204")) return .{ .status = 204, .body = .{ .bytes = "abc" } };
+        if (std.mem.eql(u8, name, "body-205")) return .{ .status = 205, .body = .{ .bytes = "abc" } };
+        if (std.mem.eql(u8, name, "duplicate-cookie")) return .{
+            .headers = &.{
+                .{ .name = "set-cookie", .value = "a=1" },
+                .{ .name = "set-cookie", .value = "b=2" },
+            },
+            .body = .{ .bytes = "abc" },
+        };
+        const field: ?zhtps.http.Header = if (std.mem.eql(u8, name, "invalid-name"))
+            .{ .name = "bad name", .value = "x" }
+        else if (std.mem.eql(u8, name, "invalid-value"))
+            .{ .name = "x-test", .value = "x\r\ny" }
+        else if (std.mem.eql(u8, name, "nul-value"))
+            .{ .name = "x-test", .value = "x\x00y" }
+        else if (std.mem.eql(u8, name, "whitespace-value"))
+            .{ .name = "x-test", .value = " \tabc\t " }
+        else if (std.mem.eql(u8, name, "empty-field"))
+            .{ .name = "x-test", .value = "" }
+        else
+            null;
+        if (field) |header| {
+            const fields = try call.scratch.allocator().alloc(zhtps.http.Header, 1);
+            fields[0] = header;
+            return .{ .headers = fields, .body = .{ .bytes = "abc" } };
+        }
+        return .{ .body = .{ .bytes = if (std.mem.eql(u8, name, "empty")) "" else "abc" } };
+    }
+
+    fn comparisonStream(call: *C, stream: *zhtps.ResponseStream) !void {
+        const name = call.request.query;
+        if (std.mem.eql(u8, name, "stream-error-before")) return error.InputOutput;
+        if (std.mem.eql(u8, name, "stream-empty")) return;
+        try stream.writer.writeAll("abc");
+        if (std.mem.eql(u8, name, "stream-error-after") or
+            std.mem.eql(u8, name, "stream-error-exact") or std.mem.eql(u8, name, "panic-after"))
+        {
+            try stream.flush();
+            if (std.mem.eql(u8, name, "panic-after")) @panic("response comparison panic");
+            return error.InputOutput;
+        }
     }
 
     fn hold(call: *C) !zhtps.http.Response {

@@ -603,10 +603,14 @@ pub fn Connection(comptime App: type, comptime Owner: type) type {
                     path,
                 ) catch return self.status(stream, 400);
                 if (question) |at| request.query = target[at + 1 ..];
-                if (request.getHeader("expect")) |expect| {
-                    if (!http.syntax.eql(expect, "100-continue")) return self.status(stream, 417);
-                    request.expect_continue = !stream.ended;
+                var expect_continue = false;
+                for (request.headers) |field| {
+                    if (!std.mem.eql(u8, field.name, "expect")) continue;
+                    const supported = http.Request.parseExpect(field.value) catch
+                        return self.status(stream, 417);
+                    expect_continue = expect_continue or supported;
                 }
+                request.expect_continue = expect_continue and !stream.ended;
                 if (request.content_length) |len| if (len > config.max_body_bytes) return self.status(
                     stream,
                     413,

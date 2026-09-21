@@ -32,6 +32,8 @@ Existing wire and queue-expiry fixtures explicitly retain their original worker
 and capacity settings so their saturation and scheduling coverage stays stable.
 Wire and library integration tests start ephemeral local servers and exercise
 real io_uring operations; they require an environment that permits those calls.
+The ongoing [failure-mode comparison](failure-modes.md) records raw HTTP/1 and
+HTTP/2 cases against Node and Go, retained policy differences, and regression fixes.
 The fuzz target compares complete versus fragmented parsing, message boundaries,
 decoded bodies, trailers, and errors. This host's Zig 0.16 fuzz test runner has an
 error-return-trace type mismatch; `-Derror-tracing=false` works around that compiler
