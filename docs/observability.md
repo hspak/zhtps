@@ -54,17 +54,33 @@ successful transmission to the local socket from abandoned work.
 
 Stderr contains newline-delimited JSON. Normal events include listener startup,
 request completion, sampled rejection, and shutdown start. `--verbose` adds
-connection/request events and operation completion results. Connection and
-request IDs, together with the worker ID, correlate records with inspection
-output. `--no-access-log` skips per-response records while retaining metrics,
-startup, sampled rejection, shutdown, and explicitly requested debug events.
-Logs never contain request bodies or arbitrary headers.
+connection/request events and operation completion results. `--no-access-log`
+skips per-response records while retaining metrics, startup, sampled rejection,
+shutdown, and explicitly requested debug events. Logs never contain request
+bodies or arbitrary headers.
+
+The `worker` ID remains a separate integer field. Connection-related records also
+include integer `conn_gen` and `conn_slot` fields, replacing the packed `connection`
+field. For example, `"worker":0,"conn_gen":59,"conn_slot":3` identifies slot 3
+on worker 0 at generation 59. The generation increments whenever a slot accepts
+a new connection; requests on the same connection share all three fields.
+Records without a connection omit `conn_gen` and `conn_slot`. Access records omit
+the increasing `request` ID; application and diagnostic events may still include it.
+To correlate with `/debug/connections`, match `worker` and reconstruct its `id`
+as `(conn_gen << 32) | (conn_slot << 8)`.
 
 Access records include `client_ip`, the socket peer's IPv4 or IPv6 address without
 a port. The address is captured when the connection is accepted and accompanies
 HTTP/1 and HTTP/2 responses, including batched responses and aborted HTTP/2 streams.
 Behind a reverse proxy this is the proxy's IP; `Forwarded` and `X-Forwarded-For`
 headers do not override it.
+
+Access records also include `user_agent` when the request supplies a `User-Agent`
+header. Header names are matched case-insensitively; the first value is used if
+repeated. The value is JSON-escaped, and an explicitly empty header is logged as
+an empty string. Each batched response retains its own value through parser reuse.
+The existing fixed log-record size limit still applies; oversized records are
+dropped and counted in `log_dropped_total`.
 
 Built-in static file responses also include `fields.file_path`, the decoded file
 path relative to the serving directory. Directory indexes include their filename,
@@ -82,7 +98,9 @@ do not require `--verbose`. See [automatic defaults](configuration.md#automatic-
 Each worker has a fixed queue (`--log-slots`, default 256). An atomic owner
 allows one asynchronous log write in flight across that server's workers and retains
 ownership across partial writes, preserving whole JSON records without blocking
-other event loops. Queues drop events when full, exposing the loss in metrics. Normal
+other event loops. Each write selects up to 128 already-queued records without
+waiting to fill the batch. See [access-log costs](access-log-performance.md) for
+measurements and sink limitations. Queues drop events when full, exposing the loss in metrics. Normal
 rejection events sample the first and every 1024th rejection; verbose mode logs
 each. Logging may lose queued records during shutdown. An unread log pipe must
 not stall HTTP processing or keep shutdown alive indefinitely; the TCP test

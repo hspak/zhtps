@@ -57,17 +57,17 @@ func (p offeredPhase) offset(index int64) time.Duration {
 }
 
 type offeredOptions struct {
-	sourceIPs                  int
-	address                    string
-	connections, shards, queue int
-	churn                      bool
-	timeout, maxLag            time.Duration
-	phases                     []offeredPhase
-	method, path, contentType  string
-	requestBody, expectedBody  []byte
-	maxRequests                uint64
-	allowChunked               bool
-	wireRequest                string
+	sourceIPs                            int
+	address                              string
+	connections, shards, queue           int
+	churn                                bool
+	timeout, maxLag                      time.Duration
+	phases                               []offeredPhase
+	method, path, contentType, userAgent string
+	requestBody, expectedBody            []byte
+	maxRequests                          uint64
+	allowChunked                         bool
+	wireRequest                          string
 }
 
 func readWorkloadFile(path string) ([]byte, error) {
@@ -100,8 +100,8 @@ func (options *offeredOptions) prepare() error {
 		options.contentType = "application/octet-stream"
 	}
 	if !strings.HasPrefix(options.path, "/") || strings.ContainsAny(options.path, "\r\n \t") ||
-		strings.ContainsAny(options.contentType, "\r\n") {
-		return fmt.Errorf("invalid request path or content type")
+		strings.ContainsAny(options.contentType, "\r\n") || strings.ContainsAny(options.userAgent, "\r\n") {
+		return fmt.Errorf("invalid request path, content type, or user agent")
 	}
 	if _, _, err := net.SplitHostPort(options.address); err != nil {
 		return err
@@ -113,6 +113,9 @@ func (options *offeredOptions) prepare() error {
 		return fmt.Errorf("workload body exceeds 64 MiB")
 	}
 	header := options.method + " " + options.path + " HTTP/1.1\r\nHost: " + options.address + "\r\n"
+	if options.userAgent != "" {
+		header += "User-Agent: " + options.userAgent + "\r\n"
+	}
 	if len(options.requestBody) != 0 || options.method == "POST" || options.method == "PUT" || options.method == "PATCH" {
 		header += fmt.Sprintf("Content-Length: %d\r\nContent-Type: %s\r\n", len(options.requestBody), options.contentType)
 	}
@@ -426,7 +429,7 @@ func runOffered(options offeredOptions) map[string]any {
 		"go_version": runtime.Version(), "gomaxprocs": runtime.GOMAXPROCS(0),
 		"workload": map[string]any{"method": options.method, "path": options.path,
 			"request_body_bytes": len(options.requestBody), "expected_body_bytes": len(options.expectedBody),
-			"content_type": options.contentType, "allow_chunked": options.allowChunked,
+			"content_type": options.contentType, "user_agent": options.userAgent, "allow_chunked": options.allowChunked,
 			"request_body_sha256":         fmt.Sprintf("%x", sha256.Sum256(options.requestBody)),
 			"expected_body_sha256":        fmt.Sprintf("%x", sha256.Sum256(options.expectedBody)),
 			"max_requests_per_connection": options.maxRequests},

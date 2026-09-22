@@ -332,6 +332,19 @@ pub fn build(b: *std.Build) !void {
         request_costs,
         .{},
     ).step);
+    const access_log = b.addExecutable(.{
+        .name = "access-log",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/access_log.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zhtps", .module = mod }},
+        }),
+    });
+    b.step("install-access-log", "Install the access log benchmark").dependOn(&b.addInstallArtifact(
+        access_log,
+        .{},
+    ).step);
 }
 
 fn addEndpointDeclarationTests(

@@ -157,12 +157,15 @@ class Http2Tests(unittest.TestCase):
             self.assertEqual(response["body"], body)
 
     def test_access_logs_include_client_ip_for_completed_and_reset_streams(self):
+        agents = ['h2/1 ("quoted" \\path)', '', None, 'h2/4']
         with self.server() as server, Client(server.port, self.context) as client:
-            streams = [client.request(headers=[("x-forwarded-for", "198.51.100.1")])
-                       for _ in range(4)]
+            streams = [client.request(headers=[("x-forwarded-for", "198.51.100.1")] +
+                                      ([("user-agent", agent)] if agent is not None else []))
+                       for agent in agents]
             for stream in streams:
                 self.success(client.wait(stream), b"ZHTPS\n")
-            stream = client.request("/echo", method="POST", end=False)
+            stream = client.request("/echo", method="POST", headers=[("user-agent", "h2/reset")],
+                                    end=False)
             client.synchronize()
             client.h2.reset_stream(stream)
             client.flush()
@@ -178,6 +181,12 @@ class Http2Tests(unittest.TestCase):
                              ["request_complete"] * 4 + ["request_aborted"])
             self.assertTrue(all(e["phase"] == "http2" for e in records))
             self.assertEqual([e.get("client_ip") for e in records], ["127.0.0.1"] * 5)
+            self.assertEqual([(e["worker"], e["conn_gen"], e["conn_slot"])
+                              for e in records], [(0, 1, 0)] * 5)
+            self.assertTrue(all("connection" not in e for e in records))
+            self.assertTrue(all("request" not in e for e in records))
+            self.assertEqual([e.get("user_agent") for e in records], agents + ["h2/reset"])
+            self.assertNotIn("user_agent", records[2])
 
     def test_alpn_multiplexed_responses_and_keepalive(self):
         with self.server() as server, Client(server.port, self.context) as client:

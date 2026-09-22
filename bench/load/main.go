@@ -309,6 +309,7 @@ func main() {
 	requestBody := flag.String("request-body", "", "open-loop request body file, at most 64 MiB")
 	expectedBody := flag.String("expect-body", "", "open-loop exact expected response body file (default ZHTPS\\n)")
 	contentType := flag.String("content-type", "application/octet-stream", "open-loop request body content type")
+	userAgent := flag.String("user-agent", "", "open-loop User-Agent header; empty omits it")
 	maxRequests := flag.Uint64("max-requests", 0, "open-loop requests per connection; 0 keeps reusing it")
 	allowChunked := flag.Bool("allow-chunked", false, "open-loop: accept chunked framing with exact expected body")
 	flag.Parse()
@@ -340,7 +341,7 @@ func main() {
 			address: *address, connections: *connections, shards: *shards, queue: *queueSize,
 			churn: *churn, timeout: *timeout, maxLag: *maxLag, phases: phases, sourceIPs: *sourceIPs,
 			method: *method, path: *path, contentType: *contentType, maxRequests: *maxRequests,
-			allowChunked: *allowChunked,
+			allowChunked: *allowChunked, userAgent: *userAgent,
 		}
 		for _, file := range []struct {
 			path string

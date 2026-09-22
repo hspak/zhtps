@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,11 +22,16 @@ func main() {
 	depth := flag.Int("depth", 1, "requests per batch")
 	fragment := flag.Int("fragment", 0, "maximum bytes per write; zero sends each batch together")
 	duration := flag.Duration("duration", 5*time.Second, "measurement interval")
+	userAgent := flag.String("user-agent", "", "User-Agent header; empty omits it")
 	flag.Parse()
-	if *connections < 1 || *depth < 1 || *depth > 64 || *fragment < 0 || *duration <= 0 {
+	if *connections < 1 || *depth < 1 || *depth > 64 || *fragment < 0 || *duration <= 0 ||
+		strings.ContainsAny(*userAgent, "\r\n") {
 		panic("invalid workload")
 	}
 	request := []byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+	if *userAgent != "" {
+		request = []byte("GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: " + *userAgent + "\r\n\r\n")
+	}
 	batch := bytes.Repeat(request, *depth)
 	type result struct {
 		Count uint64

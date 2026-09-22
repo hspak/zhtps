@@ -420,15 +420,20 @@ class WireTests(unittest.TestCase):
         self.assertFalse(any(e["event"] == "request_complete" for e in server.events))
 
     def test_access_logs_include_socket_client_ip_for_ipv4_and_ipv6(self):
+        agents = ['wire/1 ("quoted" \\path)', '', None, 'wire/4']
         for host, source in (("127.0.0.1", "127.0.0.2"), ("::1", "::1")):
             for batches in (0, 1):
                 with self.subTest(host=host, batches=batches), Running(
                     "--address", host, "--response-batches", str(batches),
                 ) as server:
                     with Client(server.port, host, (source, 0)) as client:
-                        client.send(b"GET / HTTP/1.1\r\nHost: local\r\n"
+                        client.send(b"".join(
+                                    b"GET / HTTP/1.1\r\nHost: local\r\n" +
+                                    (b"uSeR-aGeNt: " + agent.encode() + b"\r\n"
+                                     if agent is not None else b"") +
                                     b"X-Forwarded-For: 198.51.100.1\r\n"
-                                    b"Forwarded: for=198.51.100.2\r\n\r\n" * 4)
+                                    b"Forwarded: for=198.51.100.2\r\n\r\n"
+                                    for agent in agents))
                         for _ in range(4):
                             self.assertEqual(client.response()[0], 200)
                     with Client(server.admin_port) as client:
@@ -442,6 +447,13 @@ class WireTests(unittest.TestCase):
                     self.assertEqual(len(records), 5)
                     self.assertEqual([e.get("client_ip") for e in records],
                                      [source] * 4 + ["127.0.0.1"])
+                    self.assertEqual([(e["worker"], e["conn_gen"], e["conn_slot"])
+                                      for e in records], [(0, 1, 0)] * 4 + [(0, 1, 256)])
+                    self.assertTrue(all("connection" not in e for e in records))
+                    self.assertTrue(all("request" not in e for e in records))
+                    self.assertEqual([e.get("user_agent") for e in records], agents + [None])
+                    self.assertNotIn("user_agent", records[2])
+                    self.assertNotIn("user_agent", records[4])
 
     def test_access_logs_update_client_ip_when_reclaiming_a_connection_slot(self):
         with Running("--max-connections", "1", "--idle-reclaim-ms", "5") as server:
@@ -458,6 +470,8 @@ class WireTests(unittest.TestCase):
                 self.assertEqual(len(records), 3)
                 self.assertEqual([e.get("client_ip") for e in records],
                                  ["127.0.0.2", "127.0.0.3", "127.0.0.4"])
+                self.assertEqual([e["conn_gen"] for e in records], [1, 2, 3])
+                self.assertEqual([e["conn_slot"] for e in records], [0, 0, 0])
 
     def test_get_head_and_pipelining(self):
         with Client(self.server.port) as client:

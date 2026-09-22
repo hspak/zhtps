@@ -64,6 +64,7 @@ directly from retained catalogs with `python3 bench/render_reports.py`.
 
 ## Catalogs
 
+- [access-log](access-log.json)
 - [adaptive-send-pacing](adaptive-send-pacing.json)
 - [architecture-implementation](architecture-implementation.json)
 - [architecture](architecture.json)

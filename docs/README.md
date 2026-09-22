@@ -27,6 +27,7 @@
 - [Browser report](benchmarks.html): offline charts, reports, and summary downloads.
 - [Recorded runs](runs/README.md): result catalogs, run setup, and artifact retention.
 - [Benchmark guide](../bench/README.md): reproducible harnesses and methodology.
+- [Access-log costs](access-log-performance.md): generation CPU, write batching, and retained records.
 - [Architecture implementation](architecture-implementation.md): CPU placement, buffers, and executors.
 - [SIMD](simd.md), [response aggregation](response-aggregation-integrated.md), and
   [request storage and uploads](nginx-implementation.md): measurements behind retained designs.

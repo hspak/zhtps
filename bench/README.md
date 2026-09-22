@@ -1,4 +1,16 @@
-# Go comparison
+# Benchmarks
+
+## Access logs
+
+Use `zig build -Doptimize=ReleaseSafe install-access-log` to build the isolated
+formatting/queue benchmark. `bench/measure_access_log.py` alternates binaries and
+checks byte counts and queue accounting. `bench/access_log.py` compares real
+servers with file or pipe sinks, logging-disabled controls, fixed-rate or
+pipelined traffic, and an audit of every retained access record.
+See [access-log costs](../docs/access-log-performance.md) for reproduction commands,
+measured results, and the distinction between throughput and complete logging.
+
+## Go comparison
 
 Keep raw output in the ignored `zig-out/bench/` directory or another scratch
 location. Commit only useful [run summaries and descriptions](../docs/runs/README.md).

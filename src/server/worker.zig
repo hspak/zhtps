@@ -190,7 +190,7 @@ pub fn Worker(comptime App: type) type {
         application_event_fd: linux.fd_t = -1,
         application_event_value: u64 = 0,
         // Descriptors and queued record bytes stay stable until the log CQE.
-        log_iovecs: [16]std.posix.iovec_const = undefined,
+        log_iovecs: [128]std.posix.iovec_const = undefined,
         log_batch_remaining: usize = 0,
         log_disabled: bool = false,
         draining: bool = false,
@@ -2069,8 +2069,8 @@ pub fn Worker(comptime App: type) type {
                     index,
                     self.connections[index].generation,
                 ) & ~@as(u64, 255),
-                .request = stream.request_id,
                 .client_ip = self.connections[index].client_ip[0..self.connections[index].client_ip_len],
+                .user_agent = stream.request.getHeader("user-agent"),
                 .status = if (stream.response) |response| response.status else null,
                 .method = stream.request.method,
                 .duration_ns = duration,
@@ -3317,7 +3317,7 @@ pub fn Worker(comptime App: type) type {
             const connection = &self.connections[index];
             if (self.batches.len == 0) return false;
             const count = if (connection.batch) |batch| batch.count else 0;
-            const room = if (connection.batch) |batch| batch.bytes.len - batch.len else 4096;
+            const room = if (connection.batch) |batch| batch.remainingCapacity() else 4096;
             if (count == 0 and self.admission.options.max_active < 4 * self.active_connections)
                 return false;
             const more_input = connection.receive_start < connection.receive_end and
@@ -3327,10 +3327,16 @@ pub fn Worker(comptime App: type) type {
                     "\r\n\r\n",
                 ) != null;
             const method = connection.parser.request.method;
+            const user_agent = if (self.config.access_log)
+                connection.parser.request.getHeader("user-agent")
+            else
+                null;
+            const user_agent_len = if (user_agent) |header| header.len else 0;
             if (connection.admin or connection.interim or connection.streaming or
                 connection.close_after_response or connection.first_byte_recorded or
                 connection.permit != .admit or connection.body.len != 0 or connection.output_sent != 0 or
-                connection.output_len > room or connection.response_body_bytes > 4096 or
+                connection.output_len > room or user_agent_len > room - connection.output_len or
+                connection.response_body_bytes > 4096 or
                 method.len > 8 or count == 16 or (!more_input and count == 0))
             {
                 if (count == 0) return false;
@@ -3349,7 +3355,6 @@ pub fn Worker(comptime App: type) type {
             const batch = connection.batch.?;
             var response: ResponseBatch.Response = .{
                 .started_ns = connection.started_ns,
-                .request_id = connection.request_id,
                 .body_bytes = @intCast(connection.response_body_bytes),
                 .status = connection.response_status,
             };
@@ -3357,14 +3362,14 @@ pub fn Worker(comptime App: type) type {
                 @memcpy(response.method[0..method.len], method);
                 response.method_len = @intCast(method.len);
             }
-            batch.append(connection.output_buffer[0..connection.output_len], response);
+            batch.append(connection.output_buffer[0..connection.output_len], response, user_agent);
             connection.permit = null;
             connection.requests += 1;
             // Only the built-in exchange takes this path. All response bytes and
             // log metadata are owned by the batch before its parser is reset.
             self.prepareRequest(connection, platform.monotonicNs());
             connection.phase = .reading;
-            if (more_input and batch.count < batch.responses.len and batch.bytes.len - batch.len >= 256 and
+            if (more_input and batch.count < batch.responses.len and batch.remainingCapacity() >= 256 and
                 self.admission.active + self.active_connections < self.admission.options.max_active)
             {
                 try self.processInput(index);
@@ -3448,8 +3453,11 @@ pub fn Worker(comptime App: type) type {
                     .timestamp_ns = platform.realtimeNs(self.io),
                     .event = "request_complete",
                     .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
-                    .request = response.request_id,
                     .client_ip = connection.client_ip[0..connection.client_ip_len],
+                    .user_agent = if (response.user_agent) |header|
+                        batch.bytes[header.start..][0..header.len]
+                    else
+                        null,
                     .status = response.status,
                     .method = response.method[0..response.method_len],
                     .duration_ns = duration,
@@ -3752,8 +3760,8 @@ pub fn Worker(comptime App: type) type {
                     .timestamp_ns = platform.realtimeNs(self.io),
                     .event = "request_complete",
                     .connection = token(.receive, index, connection.generation) & ~@as(u64, 255),
-                    .request = connection.request_id,
                     .client_ip = connection.client_ip[0..connection.client_ip_len],
+                    .user_agent = connection.parser.request.getHeader("user-agent"),
                     .status = connection.response_status,
                     .method = connection.parser.request.method,
                     .duration_ns = duration,
@@ -5005,12 +5013,11 @@ test "response batch cancellation retains pool storage until both completions" {
             0,
         )));
         var batch: ResponseBatch = .{};
-        for (0..2) |id| batch.append("pending", .{
+        for (0..2) |_| batch.append("pending", .{
             .started_ns = platform.monotonicNs(),
-            .request_id = id,
             .body_bytes = 7,
             .status = 200,
-        });
+        }, null);
         batch.sending = true;
         var connections = [_]TestServer.Connection{.{
             .fd = fd,
@@ -5089,20 +5096,18 @@ test "response batch partial sends complete and log each response exactly once" 
     var batch: ResponseBatch = .{};
     batch.append("FIRST123", .{
         .started_ns = platform.monotonicNs(),
-        .request_id = 41,
         .body_bytes = 6,
         .status = 200,
         .method = "GETxxxxx".*,
         .method_len = 3,
-    });
+    }, "first");
     batch.append("SECOND45", .{
         .started_ns = platform.monotonicNs(),
-        .request_id = 42,
         .body_bytes = 0,
         .status = 204,
         .method = "OPTIONSx".*,
         .method_len = 7,
-    });
+    }, "second");
     batch.sending = true;
     var connections = [_]TestServer.Connection{.{
         .fd = fd,
@@ -5177,9 +5182,10 @@ test "response batch partial sends complete and log each response exactly once" 
         );
         defer record.deinit();
         try testing.expectEqualStrings(method, record.value.object.get("method").?.string);
-        try testing.expectEqual(
-            @as(i64, @intCast(41 + index)),
-            record.value.object.get("request").?.integer,
+        try testing.expect(!record.value.object.contains("request"));
+        try testing.expectEqualStrings(
+            if (index == 0) "first" else "second",
+            record.value.object.get("user_agent").?.string,
         );
     }
 }

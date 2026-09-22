@@ -16,6 +16,10 @@ def metrics(server):
         return json.loads(admin.response()[2])['counters']
 
 
+def connection_id(record):
+    return record['worker'], record['conn_gen'], record['conn_slot']
+
+
 class ResponseAggregationTests(unittest.TestCase):
     def test_access_logs_keep_each_request_after_parser_and_body_buffer_reuse(self):
         expected = [('GET', 200, b'ZHTPS\n'), ('HEAD', 200, b''),
@@ -23,8 +27,11 @@ class ResponseAggregationTests(unittest.TestCase):
         requests = [REQUEST, b'HEAD / HTTP/1.1\r\nHost: localhost\r\n\r\n',
                     b'OPTIONS / HTTP/1.1\r\nHost: localhost\r\n\r\n',
                     b'POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nabc']
+        agents = [f'client/{i} ("quoted" \\path)' for i in range(32)]
         with Running('--log-slots', '1024') as server, Client(server.port) as client:
-            client.send(b''.join(requests) * 8)
+            client.send(b''.join(request.replace(
+                b'\r\nHost:', b'\r\nUsEr-AgEnT: ' + agent.encode() + b'\r\nHost:', 1,
+            ) for request, agent in zip(requests * 8, agents)))
             for method, status, body in expected * 8:
                 self.assertEqual(client.response(head=method == 'HEAD')[::2], (status, body))
             deadline = time.monotonic() + 3
@@ -35,14 +42,35 @@ class ResponseAggregationTests(unittest.TestCase):
             self.assertEqual(len(records), 32)
             self.assertEqual([(e['method'], e['status'], e['bytes']) for e in records],
                              [(method, status, len(body)) for method, status, body in expected * 8])
-            self.assertEqual(len({e['request'] for e in records}), 32)
-            self.assertEqual([e['request'] for e in records], sorted(e['request'] for e in records))
-            self.assertEqual(len({e['connection'] for e in records}), 1)
+            self.assertTrue(all('request' not in e for e in records))
+            self.assertEqual([e['user_agent'] for e in records], agents)
+            self.assertEqual(len({connection_id(e) for e in records}), 1)
             counters = metrics(server)
             self.assertGreaterEqual(counters['responses_batched_total'], 16)
             self.assertGreater(counters['response_batches_total'], 0)
             self.assertEqual(counters['log_dropped_total'], 0)
             self.assertEqual(counters['requests_aborted_total'], 0)
+
+    def test_user_agent_storage_splits_batches_without_sending_log_metadata(self):
+        agents = [f'client/{i}/' + 'x' * 1024 for i in range(8)]
+        with Running('--response-batches', '1') as server, Client(server.port) as client:
+            client.send(b''.join(REQUEST.replace(
+                b'\r\nHost:', b'\r\nUser-Agent: ' + agent.encode() + b'\r\nHost:', 1,
+            ) for agent in agents) + REQUEST)
+            for _ in range(9):
+                self.assertEqual(client.response()[::2], (200, b'ZHTPS\n'))
+            deadline = time.monotonic() + 3
+            records = []
+            while len(records) < 9 and time.monotonic() < deadline:
+                records = [e for e in server.events if e.get('event') == 'request_complete']
+                time.sleep(.01)
+            self.assertEqual(len(records), 9)
+            self.assertEqual([e.get('user_agent') for e in records], agents + [None])
+            self.assertNotIn('user_agent', records[-1])
+            self.assertTrue(all('request' not in e for e in records))
+            counters = metrics(server)
+            self.assertGreaterEqual(counters['response_batches_total'], 2)
+            self.assertEqual(counters['log_dropped_total'], 0)
 
     def test_rate_limit_close_flushes_preceding_admitted_response(self):
         with Running('--rate', '1', '--burst', '1', '--max-rejecting', '0',
@@ -120,10 +148,10 @@ class ResponseAggregationTests(unittest.TestCase):
             deadline = time.monotonic() + 3
             while not any(e.get('event') == 'request_complete' for e in server.events) and time.monotonic() < deadline:
                 time.sleep(.01)
-            public_connection = next(e['connection'] for e in server.events if e.get('event') == 'request_complete')
-            while len([e for e in server.events if e.get('event') == 'request_complete' and e['connection'] == public_connection]) < 17 and time.monotonic() < deadline:
+            public_connection = next(connection_id(e) for e in server.events if e.get('event') == 'request_complete')
+            while len([e for e in server.events if e.get('event') == 'request_complete' and connection_id(e) == public_connection]) < 17 and time.monotonic() < deadline:
                 time.sleep(.01)
-            records = [e for e in server.events if e.get('event') == 'request_complete' and e['connection'] == public_connection]
+            records = [e for e in server.events if e.get('event') == 'request_complete' and connection_id(e) == public_connection]
             self.assertEqual(len(records), 17)
             self.assertEqual([e['bytes'] for e in records], [6] * 8 + [14] + [6] * 8)
 

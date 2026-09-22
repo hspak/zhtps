@@ -140,7 +140,8 @@ func TestOfferedPayloadValidationAndConnectionLifetime(t *testing.T) {
 	body := bytes.Repeat([]byte("payload\n"), 4096)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, err := io.ReadAll(r.Body)
-		if err != nil || r.Method != "POST" || r.URL.RequestURI() != "/echo?variant=large" || !bytes.Equal(got, body) {
+		if err != nil || r.Method != "POST" || r.URL.RequestURI() != "/echo?variant=large" ||
+			r.UserAgent() != "load-test/1" || !bytes.Equal(got, body) {
 			t.Error("request workload was not delivered intact")
 		}
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
@@ -150,7 +151,7 @@ func TestOfferedPayloadValidationAndConnectionLifetime(t *testing.T) {
 	report := runOffered(offeredOptions{
 		address: strings.TrimPrefix(server.URL, "http://"), connections: 1, shards: 1, queue: 16,
 		timeout: time.Second, maxLag: 100 * time.Millisecond, method: "POST", path: "/echo?variant=large",
-		requestBody: body, expectedBody: body, maxRequests: 3,
+		requestBody: body, expectedBody: body, maxRequests: 3, userAgent: "load-test/1",
 		phases: []offeredPhase{{100, 100 * time.Millisecond}},
 	})
 	phase := report["phases"].([]map[string]any)[0]
@@ -193,6 +194,7 @@ func TestOfferedRejectsMalformedWorkloadBeforeIo(t *testing.T) {
 		{address: "127.0.0.1:80", path: "/a HTTP/1.1\r\n"},
 		{address: "127.0.0.1:80", path: "http://elsewhere/"},
 		{address: "127.0.0.1:80", contentType: "text/plain\r\nInjected: yes"},
+		{address: "127.0.0.1:80", userAgent: "client\r\nInjected: yes"},
 	} {
 		if err := options.prepare(); err == nil {
 			t.Fatal("accepted malformed workload")

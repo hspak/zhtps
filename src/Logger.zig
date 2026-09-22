@@ -44,8 +44,11 @@ pub const Event = struct {
     level: Level = .info,
     event: []const u8,
     worker: u32 = 0,
+    /// Packed ID: generation in bits 32-63, slot in bits 8-31; the low byte is ignored.
+    /// Serialized as integer conn_gen and conn_slot fields; null omits both.
     connection: ?u64 = null,
     client_ip: ?[]const u8 = null,
+    user_agent: ?[]const u8 = null,
     request: ?u64 = null,
     status: ?u16 = null,
     reason: ?[]const u8 = null,
@@ -81,7 +84,8 @@ pub fn emit(logger: *Logger, event: Event) void {
         logger.metrics.add(.log_dropped_total, 1);
         return;
     }
-    const slot = &logger.slots[(logger.read_index + logger.count) % logger.slots.len];
+    const index = logger.read_index + logger.count;
+    const slot = &logger.slots[if (index < logger.slots.len) index else index - logger.slots.len];
     var writer: std.Io.Writer = .fixed(&slot.bytes);
     var record = event;
     record.worker = logger.worker;
@@ -106,9 +110,16 @@ fn writeRecord(record: Event, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     try writer.writeAll(",\"event\":");
     try writeJsonString(record.event, writer);
     try writer.print(",\"worker\":{d}", .{record.worker});
-    if (record.connection) |value| try writer.print(",\"connection\":{d}", .{value});
+    if (record.connection) |value| try writer.print(
+        ",\"conn_gen\":{d},\"conn_slot\":{d}",
+        .{ value >> 32, (value >> 8) & 0xffffff },
+    );
     if (record.client_ip) |value| {
         try writer.writeAll(",\"client_ip\":");
+        try writeJsonString(value, writer);
+    }
+    if (record.user_agent) |value| {
+        try writer.writeAll(",\"user_agent\":");
         try writeJsonString(value, writer);
     }
     if (record.request) |value| try writer.print(",\"request\":{d}", .{value});
@@ -155,7 +166,35 @@ fn writeRecord(record: Event, writer: *std.Io.Writer) std.Io.Writer.Error!void {
 }
 
 fn writeJsonString(value: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    try std.json.Stringify.value(value, .{}, writer);
+    if (canCopyJsonString(value)) {
+        const output = try writer.writableSlice(value.len + 2);
+        output[0] = '"';
+        @memcpy(output[1..][0..value.len], value);
+        output[output.len - 1] = '"';
+        return;
+    }
+    if (std.unicode.utf8ValidateSlice(value)) {
+        try std.json.Stringify.encodeJsonString(value, .{}, writer);
+    } else {
+        // Preserve Stringify.value's byte-array representation of invalid UTF-8.
+        try std.json.Stringify.value(value, .{ .emit_strings_as_arrays = true }, writer);
+    }
+}
+
+fn canCopyJsonString(value: []const u8) bool {
+    const Bytes = @Vector(16, u8);
+    var index: usize = 0;
+    while (value.len - index >= 16) : (index += 16) {
+        const bytes: Bytes = value[index..][0..16].*;
+        const special = (bytes < @as(Bytes, @splat(0x20))) |
+            (bytes > @as(Bytes, @splat(0x7f))) |
+            (bytes == @as(Bytes, @splat('"'))) | (bytes == @as(Bytes, @splat('\\')));
+        if (@reduce(.Or, special)) return false;
+    }
+    for (value[index..]) |byte| {
+        if (byte < 0x20 or byte > 0x7f or byte == '"' or byte == '\\') return false;
+    }
+    return true;
 }
 
 fn writeAttribute(value: Attribute.Scalar, writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -178,7 +217,8 @@ pub fn peek(logger: *Logger) ?*Slot {
 /// using its bytes before consuming it; null means the offset is not queued.
 pub fn peekAt(logger: *Logger, offset: usize) ?*Slot {
     if (offset >= logger.count) return null;
-    return &logger.slots[(logger.read_index + offset) % logger.slots.len];
+    const index = logger.read_index + offset;
+    return &logger.slots[if (index < logger.slots.len) index else index - logger.slots.len];
 }
 
 /// Accounts for a completed write across queued records. Returns the number of
@@ -187,25 +227,69 @@ pub fn peekAt(logger: *Logger, offset: usize) ?*Slot {
 pub fn consumeBytes(logger: *Logger, written: usize) usize {
     var remaining = written;
     var records: usize = 0;
+    var index = logger.read_index;
     while (remaining > 0) {
-        const slot = logger.peek().?;
+        std.debug.assert(records < logger.count);
+        const slot = &logger.slots[index];
         const count = @min(remaining, slot.len - slot.sent);
         slot.sent += count;
         remaining -= count;
         if (slot.sent == slot.len) {
-            logger.consume();
             records += 1;
+            index = if (index + 1 == logger.slots.len) 0 else index + 1;
         }
     }
+    logger.read_index = index;
+    logger.count -= records;
+    logger.metrics.set(.log_pending, logger.count);
     return records;
 }
 
 /// Asserts a slot exists and its last kernel operation has completed.
 pub fn consume(logger: *Logger) void {
     std.debug.assert(logger.count > 0);
-    logger.read_index = (logger.read_index + 1) % logger.slots.len;
+    logger.read_index = if (logger.read_index + 1 == logger.slots.len) 0 else logger.read_index + 1;
     logger.count -= 1;
     logger.metrics.set(.log_pending, logger.count);
+}
+
+test "log string encoding preserves every byte at vector boundaries" {
+    const testing = std.testing;
+    var input: [80]u8 = @splat('a');
+    for (0..input.len) |index| {
+        for (0..256) |byte| {
+            input[index] = @intCast(byte);
+            var actual_storage: [2048]u8 = undefined;
+            var expected_storage: [2048]u8 = undefined;
+            var actual: std.Io.Writer = .fixed(&actual_storage);
+            var expected: std.Io.Writer = .fixed(&expected_storage);
+            try std.json.Stringify.value(input[0..], .{}, &expected);
+            try writeJsonString(&input, &actual);
+            try testing.expectEqualStrings(expected.buffered(), actual.buffered());
+        }
+        input[index] = 'a';
+    }
+    for ([_][]const u8{
+        "",
+        "plain",
+        "quote\" and slash\\",
+        "tab\tline\nreturn\r",
+        "\xc3\xa9/\xe2\x82\xac/\xf0\x9f\x98\x80",
+        "incomplete:\xe2\x82",
+    }) |value| {
+        var actual_storage: [256]u8 = undefined;
+        var expected_storage: [256]u8 = undefined;
+        var actual: std.Io.Writer = .fixed(&actual_storage);
+        var expected: std.Io.Writer = .fixed(&expected_storage);
+        try std.json.Stringify.value(value, .{}, &expected);
+        try writeJsonString(value, &actual);
+        try testing.expectEqualStrings(expected.buffered(), actual.buffered());
+        var short: std.Io.Writer = .fixed(actual_storage[0 .. expected.end - 1]);
+        try testing.expectError(error.WriteFailed, writeJsonString(value, &short));
+        var exact: std.Io.Writer = .fixed(actual_storage[0..expected.end]);
+        try writeJsonString(value, &exact);
+        try testing.expectEqualStrings(expected.buffered(), exact.buffered());
+    }
 }
 
 test "logger escapes JSON, filters debug, and drops when queue is full" {
@@ -234,6 +318,8 @@ test "logger escapes JSON, filters debug, and drops when queue is full" {
     );
     defer parsed.deinit();
     try testing.expectEqualStrings("quote\"\nnewline", parsed.value.object.get("reason").?.string);
+    try testing.expect(!parsed.value.object.contains("conn_gen"));
+    try testing.expect(!parsed.value.object.contains("conn_slot"));
     logger.emit(.{ .timestamp_ns = 2, .event = "dropped" });
     try testing.expectEqual(@as(u64, 1), metrics.get(.log_dropped_total));
     try testing.expectEqual(@as(usize, 1), logger.count);
@@ -294,8 +380,8 @@ test "access records preserve escaping, extra fields and overflow accounting" {
         .timestamp_ns = 1,
         .event = "request_complete",
         .worker = 99,
-        .connection = 3,
-        .request = 4,
+        .connection = 253403071232,
+        .user_agent = "client/1 \"quoted\"\\path",
         .status = 200,
         .method = "G\"ET\n",
         .duration_ns = 5,
@@ -303,7 +389,7 @@ test "access records preserve escaping, extra fields and overflow accounting" {
     };
     logger.emit(event);
     const expected =
-        \\{"timestamp_ns":1,"level":"info","event":"request_complete","worker":7,"connection":3,"request":4,"status":200,"method":"G\"ET\n","duration_ns":5,"bytes":6}
+        \\{"timestamp_ns":1,"level":"info","event":"request_complete","worker":7,"conn_gen":59,"conn_slot":3,"user_agent":"client/1 \"quoted\"\\path","status":200,"method":"G\"ET\n","duration_ns":5,"bytes":6}
     ;
     try testing.expectEqualStrings(expected ++ "\n", logger.peek().?.bytes[0..logger.peek().?.len]);
     logger.consume();
