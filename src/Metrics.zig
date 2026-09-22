@@ -50,6 +50,8 @@ pub const Counter = enum {
     log_events_total,
     log_dropped_total,
     log_write_errors_total,
+    metrics_pushes_total,
+    metrics_push_errors_total,
     rejection_aborted_total,
     responses_1xx_total,
     responses_2xx_total,

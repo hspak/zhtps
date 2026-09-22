@@ -4,13 +4,16 @@ const std = @import("std");
 const Config = @import("Config.zig");
 const Tls = @import("Tls.zig");
 const Logger = @import("Logger.zig");
+const VictoriaMetrics = @import("VictoriaMetrics.zig");
 const VictoriaLogs = Logger.VictoriaLogs;
 const platform = @import("platform.zig");
 const builtin_application = @import("application.zig");
 const worker = @import("server/worker.zig");
 
-pub const InitError = worker.RunError || VictoriaLogs.InitError || VictoriaLogs.IdentityError;
-pub const RunError = InitError || std.Thread.SpawnError || VictoriaLogs.StartError || error{AlreadyServed};
+pub const InitError = worker.RunError || VictoriaMetrics.InitError ||
+    VictoriaLogs.InitError || VictoriaLogs.IdentityError;
+pub const RunError = InitError || std.Thread.SpawnError || VictoriaLogs.StartError ||
+    VictoriaMetrics.StartError || error{AlreadyServed};
 
 /// App.Exchange implements the low-level hooks illustrated by application.Exchange.
 /// Direct hooks must be bounded and nonblocking; generated endpoint applications
@@ -27,6 +30,7 @@ pub fn Server(comptime App: type) type {
         threads: []std.Thread,
         automatic_mapping: []u8,
         victoria_logs: ?*VictoriaLogs,
+        victoria_metrics: ?*VictoriaMetrics,
         phase: enum {
             ready,
             serving,
@@ -36,7 +40,8 @@ pub fn Server(comptime App: type) type {
         /// Binds every listener and allocates worker storage without starting threads.
         /// The allocator, io, configuration strings, and log descriptor are borrowed
         /// until deinit. io must support concurrent wall-clock reads during serve.
-        /// Direct VictoriaLogs delivery also requires cancellable concurrent network I/O.
+        /// Direct VictoriaLogs or VictoriaMetrics delivery also requires cancellable
+        /// concurrent network I/O.
         /// On error all acquired resources are released; self remains undefined.
         /// On success the value may move, but must not be copied or mutated directly.
         /// Call deinit even if serve is never called.
@@ -57,7 +62,8 @@ pub fn Server(comptime App: type) type {
         /// wall-clock reads during serve. On error all acquired resources are
         /// released; self remains undefined. On success the value may move, but
         /// must not be copied or mutated directly. Call deinit even if never served.
-        /// Direct VictoriaLogs delivery requires cancellable concurrent network I/O.
+        /// Direct VictoriaLogs or VictoriaMetrics delivery requires cancellable
+        /// concurrent network I/O.
         pub fn initApplication(
             self: *Self,
             gpa: std.mem.Allocator,
@@ -136,12 +142,22 @@ pub fn Server(comptime App: type) type {
                 try sender.setInstance(resolved.address, resolved.port);
                 for (workers) |*item| item.logger.source = sender.source();
             }
+            const victoria_metrics = if (resolved.victoria_metrics) |url| sender: {
+                const sender = try gpa.create(VictoriaMetrics);
+                errdefer gpa.destroy(sender);
+                try sender.init(io, url, &workers[0].metrics, .{
+                    .address = resolved.address,
+                    .port = resolved.port,
+                });
+                break :sender sender;
+            } else null;
             self.* = .{
                 .gpa = gpa,
                 .shared = shared,
                 .threads = threads,
                 .automatic_mapping = automatic_mapping,
                 .victoria_logs = victoria_logs,
+                .victoria_metrics = victoria_metrics,
             };
         }
 
@@ -191,6 +207,8 @@ pub fn Server(comptime App: type) type {
                     if (!platform.cpuAllowed(&allowed, item.worker_cpu.?)) return error.CpuUnavailable;
                 }
             }
+            if (self.victoria_metrics) |sender| try sender.start(Worker, &workers[0]);
+            defer if (self.victoria_metrics) |sender| sender.finish(Worker, &workers[0]);
             if (self.victoria_logs) |sender| try sender.start();
             defer if (self.victoria_logs) |sender| {
                 var loggers: [256]*Logger = undefined;
@@ -228,6 +246,10 @@ pub fn Server(comptime App: type) type {
         pub fn deinit(self: *Self) void {
             std.debug.assert(self.phase != .serving);
             const workers = self.shared.workers;
+            if (self.victoria_metrics) |sender| {
+                sender.deinit();
+                self.gpa.destroy(sender);
+            }
             for (0..workers.len) |offset| workers[workers.len - 1 - offset].deinit();
             if (self.victoria_logs) |sender| {
                 sender.deinit();
@@ -262,6 +284,7 @@ pub fn Server(comptime App: type) type {
 
 test {
     _ = worker;
+    _ = VictoriaMetrics;
 }
 
 test "worker placement restores caller affinity after stop and loop error" {

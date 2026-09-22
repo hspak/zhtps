@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const Admission = @import("Admission.zig");
+const VictoriaMetrics = @import("VictoriaMetrics.zig");
 const VictoriaLogs = @import("Logger.zig").VictoriaLogs;
 pub const Resources = @import("Config/Resources.zig");
 const Config = @This();
@@ -74,6 +75,9 @@ log_fd: ?i32 = 2,
 /// HTTP(S) origin for direct JSON ingestion. Borrows storage until server deinit;
 /// overrides log_fd and requires access_log. The server owns the posting transport.
 victoria_logs: ?[]const u8 = null,
+/// HTTP(S) origin for periodic aggregate metric snapshots. Borrows storage until
+/// server deinit; independent of logging and the admin listener.
+victoria_metrics: ?[]const u8 = null,
 verbose: bool = false,
 access_log: bool = true,
 admission: AdmissionOptions = .{},
@@ -153,6 +157,7 @@ pub const AdmissionOptions = struct {
 
 pub const Error = error{
     InvalidVictoriaLogsUrl,
+    InvalidVictoriaMetricsUrl,
     ConflictingLogOptions,
     InvalidOption,
     HttpsRequired,
@@ -166,6 +171,7 @@ pub const Error = error{
 
 /// Rejects unsupported limits and listener combinations without allocating or binding.
 pub fn validate(config: Config) Error!void {
+    if (config.victoria_metrics) |url| _ = try VictoriaMetrics.parseOrigin(url);
     if (config.victoria_logs) |url| {
         if (!config.access_log) return error.ConflictingLogOptions;
         _ = try VictoriaLogs.parseOrigin(url);
@@ -449,6 +455,8 @@ pub fn parse(args: []const []const u8) Error!Config {
         if (std.mem.eql(u8, arg, "--victoria-logs")) {
             config.victoria_logs = value;
             config.log_fd = null;
+        } else if (std.mem.eql(u8, arg, "--victoria-metrics")) {
+            config.victoria_metrics = value;
         } else if (std.mem.eql(u8, arg, "--memory-budget-bytes")) {
             config.memory_budget_bytes = if (std.mem.eql(u8, value, "auto"))
                 null
@@ -1040,4 +1048,35 @@ test "VictoriaLogs configuration validates embedded and command-line logging cho
     const config = try parse(&.{"--no-access-logs"});
     try testing.expect(!config.access_log);
     try testing.expectEqual(@as(?i32, 2), config.log_fd);
+}
+
+test "VictoriaMetrics configuration is independent of logs and admin listeners" {
+    const testing = std.testing;
+    try testing.expect((try parse(&.{})).victoria_metrics == null);
+    for ([_][]const u8{
+        "http://localhost:8428",
+        "https://metrics.example.com/",
+        "http://127.0.0.1:8428",
+        "http://[::1]:8428",
+    }) |url| {
+        const config = try parse(&.{
+            "--victoria-metrics",
+            url,
+            "--no-access-logs",
+            "--admin-connections",
+            "0",
+        });
+        try testing.expectEqualStrings(url, config.victoria_metrics.?);
+        try testing.expectEqual(@as(?i32, 2), config.log_fd);
+        try testing.expect(!config.access_log);
+        try testing.expectEqual(@as(usize, 0), config.admin_connections);
+    }
+    try (Config{
+        .victoria_metrics = "https://metrics.example.com",
+        .victoria_logs = "https://logs.example.com",
+        .log_fd = null,
+    }).validate();
+    try testing.expectError(error.InvalidVictoriaMetricsUrl, (Config{
+        .victoria_metrics = "http://host/path",
+    }).validate());
 }

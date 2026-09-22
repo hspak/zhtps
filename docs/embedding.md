@@ -89,6 +89,14 @@ network operations. The server owns the delivery pipe and sender; `serve` allows
 up to two additional seconds for final log delivery after workers stop. See the
 [logging options](../README.md#logging-and-help) for the schema and delivery limits.
 
+Set `.victoria_metrics = "http://127.0.0.1:8428"` to push server and custom
+application metrics. This borrows the URL until `deinit` and requires cancellable
+concurrent network I/O. It works with `log_fd = null`, `access_log = false`, or
+`admin_connections = 0`, and can run alongside VictoriaLogs. The server owns the
+sender; `serve` attempts a final snapshot after workers and log delivery stop,
+allowing up to two additional seconds for its network request. See
+[direct metric delivery](observability.md#direct-victoriametrics-push).
+
 The [complete standalone consumer](../examples/embedded/main.zig) runs `serve` on
 a host-owned thread and shuts it down when Enter is pressed. Build or run it
 from `examples/embedded` with `zig build` or `zig build run`. Its tests import

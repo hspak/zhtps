@@ -14,6 +14,7 @@ zig build test-resources
 zig build test-deploy
 zig build test-tls
 zig build test-victoria-logs
+zig build test-victoria-metrics
 zig build test-application test-upload test-response-streaming
 zig build test -Dtest-filter='fuzz framing' -Derror-tracing=false --fuzz=100K
 python3 tests/load.py --port 8080 --rate 1000 --duration 10 --connections 32
@@ -32,6 +33,13 @@ and bounded shutdown. Trusted HTTPS and hostname verification also run when
 `bwrap` and user mount namespaces are available; they mount an isolated test CA
 bundle without modifying the system trust store. It does not require a running
 VictoriaLogs installation.
+
+The VictoriaMetrics suite checks periodic and final aggregate snapshots, custom
+application counters/gauges/histograms across workers, source labels, capture
+timestamps, connection reuse, URL validation, collector recovery, bounded shutdown,
+TLS trust and hostname verification, and operation without an admin listener.
+It also runs both Victoria senders together. It uses the same local collector and
+isolated CA setup as the log suite; no VictoriaMetrics installation is required.
 
 Automatic sizing tests launch the real server with restricted CPU affinity and
 descriptor limits, check the effective config, and serve HTTP requests. In-file

@@ -57,6 +57,7 @@ pub fn main(init: std.process.Init) !void {
                 "  --no-access-log              omit per-response logs; keep metrics\n" ++
                 "  --no-access-logs             alias for --no-access-log\n" ++
                 "  --victoria-logs URL           post logs to HTTP(S) origin; disable stderr logging\n" ++
+                "  --victoria-metrics URL        push metrics to HTTP(S) origin every 10 seconds\n" ++
                 "  --verbose                    include JSON debug events\n",
         );
         return;

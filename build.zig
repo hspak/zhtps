@@ -243,6 +243,21 @@ pub fn build(b: *std.Build) !void {
     b.step("test-victoria-logs", "Check direct log ingestion and collector failures").dependOn(
         &victoria_logs.step,
     );
+    const victoria_metrics = b.addSystemCommand(&.{ "python3", "tests/victoria_metrics.py" });
+    victoria_metrics.addArtifactArg(exe);
+    const metrics_application = b.addExecutable(.{
+        .name = "metrics-application",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/metrics_application.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zhtps", .module = mod }},
+        }),
+    });
+    victoria_metrics.addArtifactArg(metrics_application);
+    b.step("test-victoria-metrics", "Check metric snapshots and collector failures").dependOn(
+        &victoria_metrics.step,
+    );
     const tls_wire = b.addSystemCommand(&.{ "python3", "tests/tls.py" });
     tls_wire.addArtifactArg(exe);
     const tls_application = b.addExecutable(.{

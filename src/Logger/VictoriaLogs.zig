@@ -4,6 +4,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const Logger = @import("../Logger.zig");
 const Metrics = @import("../Metrics.zig");
+const http_push = @import("../http_push.zig");
 const platform = @import("../platform.zig");
 const VictoriaLogs = @This();
 
@@ -31,10 +32,6 @@ const Completion = union(enum) {
     deadline: std.Io.Cancelable!void,
 };
 const Selection = std.Io.Select(Completion);
-const PostCompletion = union(enum) {
-    response: std.http.Client.FetchError!std.http.Client.FetchResult,
-    deadline: std.Io.Cancelable!void,
-};
 
 pub const UrlError = error{InvalidVictoriaLogsUrl};
 pub const IdentityError = error{IdentityTooLong};
@@ -45,26 +42,7 @@ pub const StartError = std.Io.ConcurrentError;
 /// paths, queries and fragments rather than silently changing their meaning.
 /// The returned URI borrows url. No DNS lookup or network access occurs.
 pub fn parseOrigin(url: []const u8) UrlError!std.Uri {
-    for (url) |byte| if (byte <= 0x20 or byte >= 0x7f) return error.InvalidVictoriaLogsUrl;
-    const uri = std.Uri.parse(url) catch return error.InvalidVictoriaLogsUrl;
-    if ((!std.mem.eql(u8, uri.scheme, "http") and !std.mem.eql(u8, uri.scheme, "https")) or
-        uri.host == null or uri.host.?.isEmpty() or uri.user != null or uri.password != null or
-        uri.query != null or uri.fragment != null or uri.port == 0)
-        return error.InvalidVictoriaLogsUrl;
-    const path = switch (uri.path) {
-        .raw, .percent_encoded => |value| value,
-    };
-    if (path.len != 0 and !std.mem.eql(u8, path, "/")) return error.InvalidVictoriaLogsUrl;
-    // Uri.parse is deliberately permissive; validate before passing its host
-    // to HTTP APIs that assume a validated hostname or bracketed IP literal.
-    const host = uri.host.?.percent_encoded;
-    if (host[0] == '[') {
-        _ = std.Io.net.IpAddress.parseLiteral(host) catch return error.InvalidVictoriaLogsUrl;
-    } else std.Io.net.HostName.validate(host) catch return error.InvalidVictoriaLogsUrl;
-    const authority = url[uri.scheme.len + 3 .. url.len - path.len];
-    const host_end = if (uri.port != null) std.mem.lastIndexOfScalar(u8, authority, ':').? else authority.len;
-    if (!std.mem.eql(u8, host, authority[0..host_end])) return error.InvalidVictoriaLogsUrl;
-    return uri;
+    return http_push.parseOrigin(url) catch return error.InvalidVictoriaLogsUrl;
 }
 
 /// Owns both pipe descriptors. Borrows io, url and metrics until deinit; io must
@@ -215,33 +193,13 @@ fn flush(self: *VictoriaLogs, client: *std.http.Client) !void {
         index + 1
     else
         return;
-    // The client caches its CA bundle and verification time. Keep certificate
-    // validity checks current when a long-running sender reconnects.
-    if (client.now != null) client.now = std.Io.Clock.real.now(self.io);
     var uri = self.origin;
     uri.path = .{ .percent_encoded = "/insert/jsonline" };
     uri.query = .{ .percent_encoded = "_msg_field=event&_time_field=timestamp_ns&_stream_fields=app,host,instance" };
-    var results: [2]PostCompletion = undefined;
-    var selection: std.Io.Select(PostCompletion) = .init(self.io, &results);
-    defer selection.cancelDiscard();
-    try selection.concurrent(.response, std.http.Client.fetch, .{ client, .{
-        .location = .{ .uri = uri },
-        .method = .POST,
-        .payload = self.batch[0..end],
-        .redirect_behavior = .unhandled,
-        .headers = .{ .content_type = .{ .override = "application/stream+json" } },
-    } });
-    try selection.concurrent(.deadline, std.Io.sleep, .{
-        self.io,
-        .fromSeconds(2),
-        .awake,
-    });
-    const succeeded = switch (try selection.await()) {
-        .response => |response| if (response) |result| result.status.class() == .success else |_| false,
-        .deadline => false,
+    const succeeded = http_push.post(client, uri, self.batch[0..end], "application/stream+json") catch |err| switch (err) {
+        error.OutOfMemory => false,
+        error.Canceled, error.ConcurrencyUnavailable => return err,
     };
-    // The request must stop borrowing the batch before the buffer is reused.
-    selection.cancelDiscard();
     if (!succeeded) {
         self.metrics.add(.log_write_errors_total, 1);
         self.metrics.add(.log_dropped_total, self.batch_records);

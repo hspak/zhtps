@@ -50,6 +50,68 @@ preparation time excludes CQ waiting and is not a full CPU utilization measure.
 Responses are counted when queued; completion and abort counters distinguish
 successful transmission to the local socket from abandoned work.
 
+## Direct VictoriaMetrics push
+
+```sh
+zhtps --victoria-metrics http://127.0.0.1:8428
+zhtps --victoria-metrics https://metrics.example.com --victoria-logs https://logs.example.com
+```
+
+The recommended push method for this server is batched Prometheus text over
+HTTP(S), using `/api/v1/import/prometheus`. This is an engineering choice for our
+small, fixed-cardinality snapshots, rather than a claim that text wins every
+ingestion benchmark. It reuses the `/metrics` renderer, including application
+metrics, without adding codecs or dependencies. VictoriaMetrics documents this
+endpoint, request-wide labels, timestamps, and optional gzip in its
+[Prometheus import guide](https://docs.victoriametrics.com/single-server-victoriametrics/#how-to-import-data-in-prometheus-exposition-format).
+
+| Method | Fit for ZHTPS |
+|---|---|
+| Prometheus text | Existing representation; one batch per snapshot with preserved metric names and histogram buckets. Selected. |
+| Remote write | Protobuf and Snappy require additional encoding and compression. Worth reconsidering for much higher cardinality or bandwidth pressure. |
+| JSONL | Separate encoder; per-series arrays offer little benefit when each snapshot has one sample per series. |
+| CSV | Separate schema and encoder, especially for labeled histogram buckets and application metrics. |
+| Native binary | Intended for importing VictoriaMetrics exports; the documented format is unstable and discouraged for external encoders. |
+
+The [remote-write specification](https://prometheus.io/docs/specs/prw/remote_write_spec/)
+defines its protobuf/Snappy requirements. The [VictoriaMetrics import guide](https://docs.victoriametrics.com/single-server-victoriametrics/#how-to-import-time-series-data)
+describes the other formats and native-format restriction.
+
+A local startup snapshot measured 176 samples and 10,893 bytes including type
+comments: approximately 1.1 kB/s at ten-second intervals, before HTTP/TLS overhead.
+Gzip reduced that example to 1,119 bytes, but this implementation sends plain text
+to keep encoding work and dependencies small at this rate. Counts and integer
+widths grow with traffic; custom metrics add series. This is a payload measurement,
+not a comparative ingestion-throughput benchmark. Collection reads each worker's
+atomic metrics once per snapshot; no new per-request work is added. Connection
+reuse amortizes TCP/TLS setup.
+
+The sender starts with an immediate snapshot, waits ten seconds after each attempt,
+and sends one final snapshot after producers stop. Every batch carries its capture
+timestamp in Unix milliseconds, plus `job=zhtps`, the machine hostname (`host`),
+and `[PUBLIC_ADDRESS]:BOUND_PORT` (`instance`). The host/instance pair distinguishes
+servers across machines. All workers contribute to the same series; request paths,
+client addresses and worker IDs do not become labels. Snapshots are atomic reads,
+not transactions across all metric fields, as with `/metrics`.
+
+Delivery uses a separate background task, one reusable 256 KiB body buffer, and
+the same deadline-bound HTTP transport as VictoriaLogs. HTTP(S) origins may end
+with `/`; credentials, paths, queries and fragments are rejected. HTTPS uses the
+system trust store and verifies the hostname. Redirects are not followed.
+Each POST has a two-second deadline; shutdown cancels the current attempt and
+allows up to two additional seconds for the final POST. Logging options and the
+admin listener do not control metric publishing.
+
+Delivery is best effort, with no durable queue or retry of old snapshots. Network
+errors, non-2xx responses, timeouts, concurrency failures and buffer overflow
+increment `zhtps_metrics_push_errors_total`; successful HTTP deliveries increment
+`zhtps_metrics_pushes_total`. Failed intervals lose gauge/history samples; subsequent
+cumulative counters retain their totals. VictoriaMetrics' streaming import can
+acknowledge malformed input, so HTTP success does not prove every sample was
+stored; monitor the collector's `vm_rows_invalid_total` as well. Do not also scrape
+these same series into the same database without arranging distinct labels or
+deduplication.
+
 ## Structured logging
 
 Stderr contains newline-delimited JSON. Normal events include listener startup,

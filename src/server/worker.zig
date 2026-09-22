@@ -6,6 +6,7 @@ const platform = @import("../platform.zig");
 const http = @import("../http.zig");
 const Config = @import("../Config.zig");
 const Tls = @import("../Tls.zig");
+const VictoriaMetrics = @import("../VictoriaMetrics.zig");
 const Metrics = @import("../Metrics.zig");
 const metrics_format = @import("../metrics_format.zig");
 const Logger = @import("../Logger.zig");
@@ -700,6 +701,12 @@ pub fn Worker(comptime App: type) type {
                 requirements.process_threads = 4;
                 requirements.process_fds = 4;
                 requirements.process_bytes = @sizeOf(Logger.VictoriaLogs) + 5 * 1024 * 1024;
+            }
+            if (config.victoria_metrics != null) {
+                // Periodic sender, HTTP request and request deadline, plus TLS headroom.
+                requirements.process_threads += 3;
+                requirements.process_fds += 2;
+                requirements.process_bytes += @sizeOf(VictoriaMetrics) + 4 * 1024 * 1024;
             }
             if (config.log_fd != null or config.victoria_logs != null)
                 requirements.worker_bytes +|= config.log_slots *| @sizeOf(Logger.Slot);
@@ -2979,22 +2986,10 @@ pub fn Worker(comptime App: type) type {
             var writer: std.Io.Writer = .fixed(connection.application_buffer);
             var content_type: []const u8 = "application/json";
             if (std.mem.eql(u8, request.path, "/metrics")) {
-                const snapshot = self.aggregateMetrics();
-                metrics_format.prometheus.write(&snapshot, &writer) catch {
+                self.writePrometheus(&writer) catch {
                     try self.respondStatus(index, 500, true);
                     return;
                 };
-                if (comptime has_application_metrics) {
-                    const application_snapshot = self.aggregateApplicationMetrics();
-                    ApplicationMetrics.writePrometheus(
-                        &application_snapshot,
-                        &writer,
-                        App.metrics_namespace,
-                    ) catch {
-                        try self.respondStatus(index, 500, true);
-                        return;
-                    };
-                }
                 content_type = metrics_format.prometheus.content_type;
             } else if (std.mem.eql(u8, request.path, "/debug/metrics")) {
                 const snapshot = self.aggregateMetrics();
@@ -3063,6 +3058,17 @@ pub fn Worker(comptime App: type) type {
                 index,
                 .{ .headers = &fields, .body = .{ .bytes = writer.buffered() } },
             );
+        }
+
+        /// Captures all workers' atomic server and application metrics without
+        /// accessing connection storage. Safe for concurrent background publishing.
+        pub fn writePrometheus(self: *const Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            const snapshot = self.aggregateMetrics();
+            try metrics_format.prometheus.write(&snapshot, writer);
+            if (comptime has_application_metrics) {
+                const application_snapshot = self.aggregateApplicationMetrics();
+                try ApplicationMetrics.writePrometheus(&application_snapshot, writer, App.metrics_namespace);
+            }
         }
 
         fn aggregateMetrics(self: *const Self) Metrics.Snapshot {

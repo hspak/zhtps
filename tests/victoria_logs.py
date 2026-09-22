@@ -35,6 +35,7 @@ class Collector:
         self.status = status
         self.stalled = stalled
         self.posts = []
+        self.peers = []
         self.release = threading.Event()
         owner = self
 
@@ -43,6 +44,7 @@ class Collector:
 
             def do_POST(self):
                 payload = self.rfile.read(int(self.headers["Content-Length"]))
+                owner.peers.append(self.client_address)
                 owner.posts.append((self.path, {k.lower(): v for k, v in self.headers.items()}, payload, owner.status))
                 if owner.stalled:
                     owner.release.wait(10)

@@ -233,6 +233,10 @@ All timeout and age values below are in milliseconds.
   with both spellings of `--no-access-log`. Supply an origin, optionally ending
   in `/`, without credentials, a path, query, or fragment. HTTPS verifies the
   collector certificate using the system trust store.
+- `--victoria-metrics http(s)://HOST[:PORT]` (default: unset): Push aggregate
+  Prometheus metrics to VictoriaMetrics at startup, every ten seconds after the
+  previous attempt, and at shutdown. Uses the same origin restrictions and TLS
+  verification as `--victoria-logs`; works independently of logging and the admin listener.
 - `--verbose` (default: off): Include JSON debug events.
 - `--help` (default: off): Print usage and exit; pass this flag alone.
 
@@ -255,6 +259,16 @@ the pipe and current HTTP batch. Full queues drop new records. Shutdown allows
 up to two additional seconds to drain remaining logs. Delivery is best effort,
 with no durable spool or exactly-once guarantee. Invalid command-line options
 still produce an error on stderr before a logging destination is configured.
+
+For example, `zhtps --victoria-metrics http://127.0.0.1:8428` posts snapshots to
+`/api/v1/import/prometheus`. It includes custom application metrics, labels each
+snapshot with `job=zhtps`, `host`, and the bound listener `instance`, and preserves
+the capture time. A background sender reuses connections and a fixed 256 KiB
+buffer. Failed or oversized snapshots are dropped; the next interval captures
+fresh cumulative counters. Each request, including the final shutdown attempt,
+has a two-second deadline. Monitor `zhtps_metrics_pushes_total` and
+`zhtps_metrics_push_errors_total`. See the [push protocol assessment](docs/observability.md#direct-victoriametrics-push)
+for the format choice and delivery limits.
 
 Embedded applications also configure lanes and buffer sizes through the Zig API.
 Each lane defaults to `threads = 1`, `queue = 64`, and `timeout_ms = 100`; thread
