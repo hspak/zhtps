@@ -9,6 +9,10 @@ address: []const u8 = "127.0.0.1",
 port: u16 = 8080,
 /// Encrypts the public listener. The separate admin listener remains HTTP.
 tls: ?Tls = null,
+/// Serves 308 redirects on a separate HTTP listener. Requires TLS credentials.
+http_redirect: bool = false,
+/// Uses the public address. Zero selects a free port; ignored unless enabled.
+http_redirect_port: u16 = 80,
 http2: Http2 = .{},
 admin_address: []const u8 = "127.0.0.1",
 admin_port: u16 = 9090,
@@ -142,6 +146,7 @@ pub const AdmissionOptions = struct {
 
 pub const Error = error{
     InvalidOption,
+    HttpsRequired,
     MissingArgument,
     InvalidLimit,
     UnresolvedResources,
@@ -152,6 +157,11 @@ pub const Error = error{
 
 /// Rejects unsupported limits and listener combinations without allocating or binding.
 pub fn validate(config: Config) Error!void {
+    if (config.http_redirect) {
+        if (config.tls == null) return error.HttpsRequired;
+        if (config.port != 0 and config.http_redirect_port == config.port)
+            return error.InvalidOption;
+    }
     if (config.http2.max_streams == 0 or config.http2.max_streams > 65535 or
         config.http2.max_streams_per_worker == 0 or
         (config.http2.max_streams_per_worker != automatic and config.http2.max_streams_per_worker > 65535) or
@@ -414,6 +424,10 @@ pub fn parse(args: []const []const u8) Error!Config {
             config.access_log = false;
             continue;
         }
+        if (std.mem.eql(u8, arg, "--http-redirect")) {
+            config.http_redirect = true;
+            continue;
+        }
         if (i + 1 == args.len) return error.MissingArgument;
         i += 1;
         const value = args[i];
@@ -461,6 +475,8 @@ pub fn parse(args: []const []const u8) Error!Config {
             config.port = std.fmt.parseInt(u16, value, 10) catch return error.InvalidOption;
         } else if (std.mem.eql(u8, arg, "--admin-port")) {
             config.admin_port = std.fmt.parseInt(u16, value, 10) catch return error.InvalidOption;
+        } else if (std.mem.eql(u8, arg, "--http-redirect-port")) {
+            config.http_redirect_port = std.fmt.parseInt(u16, value, 10) catch return error.InvalidOption;
         } else if (std.mem.eql(u8, arg, "--tcp-retries")) {
             config.tcp_retries = if (std.mem.eql(u8, value, "system"))
                 .system
@@ -527,6 +543,48 @@ pub fn parse(args: []const []const u8) Error!Config {
     }
     try config.validate();
     return config;
+}
+
+test "HTTP redirect requires TLS and distinct listener ports" {
+    const testing = std.testing;
+    try testing.expectError(error.HttpsRequired, (Config{ .http_redirect = true }).validate());
+    try testing.expectError(error.HttpsRequired, parse(&.{"--http-redirect"}));
+    try testing.expectError(error.InvalidOption, parse(&.{
+        "--http-redirect",
+        "--tls-certificate",
+        "server.pem",
+    }));
+    const credentials = [_][]const u8{
+        "--tls-certificate",
+        "server.pem",
+        "--tls-key",
+        "server.key",
+    };
+    try testing.expect(!(try parse(&credentials)).http_redirect);
+    const defaults = try parse(&(.{"--http-redirect"} ++ credentials));
+    try testing.expect(defaults.http_redirect);
+    try testing.expectEqual(@as(u16, 80), defaults.http_redirect_port);
+    const config = try parse(&(credentials ++ .{
+        "--http-redirect-port",
+        "8081",
+        "--http-redirect",
+    }));
+    try testing.expect(config.http_redirect);
+    try testing.expectEqual(@as(u16, 8081), config.http_redirect_port);
+    try testing.expectError(error.InvalidOption, parse(&(credentials ++ .{
+        "--http-redirect",
+        "--http-redirect-port",
+        "8080",
+    })));
+    try testing.expectError(error.InvalidOption, parse(&.{ "--http-redirect-port", "65536" }));
+    try testing.expectError(error.MissingArgument, parse(&.{"--http-redirect-port"}));
+    _ = try parse(&(credentials ++ .{
+        "--http-redirect",
+        "--http-redirect-port",
+        "0",
+        "--port",
+        "0",
+    }));
 }
 
 test "automatic defaults size the whole application within CPU and descriptor limits" {

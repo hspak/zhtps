@@ -410,6 +410,10 @@ fn initialize(gpa: std.mem.Allocator, io: std.Io, config: zhtps.Config) !void {
     var server: zhtps.DefaultServer = undefined;
     try server.init(gpa, io, config);
     defer server.deinit();
+    if (config.http_redirect) {
+        const port = server.httpRedirectPort() orelse return error.MissingRedirectListener;
+        try std.testing.expect(port != 0 and port != server.port());
+    } else try std.testing.expectEqual(null, server.httpRedirectPort());
 }
 
 pub fn main(init: std.process.Init) !void {

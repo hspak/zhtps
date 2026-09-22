@@ -7,6 +7,36 @@ start and remain owned until server deinit. Restart with new credentials to
 replace a certificate. ACME and client certificate authentication are outside
 the current server's scope. TLS listeners support [HTTP/2](http2.md).
 
+Add `--http-redirect` to accept plain HTTP on a separate port and send **308
+Permanent Redirect** responses to the HTTPS public listener. The HTTP listener
+uses `--address` and `--http-redirect-port` (default `80`; `0` selects a free port).
+HTTPS continues to use `--port`. For example:
+
+```sh
+zig-out/bin/zhtps --port 8443 --tls-certificate server.pem --tls-key server.key \
+  --http-redirect --http-redirect-port 8080
+```
+
+This redirects `http://localhost:8080/path?query` to
+`https://localhost:8443/path?query`. The redirect keeps the request's hostname and
+original path/query octets, replaces its port with the HTTPS listener's actual
+port, and omits port 443. Absolute-form targets supply the hostname instead of
+Host; an empty or absent HTTP/1.0 Host falls back to the configured public address.
+CONNECT and `OPTIONS *` have no redirectable path and receive 400. Request syntax
+and transport scheme validation still apply.
+
+Redirects precede application hooks and `100 Continue`. Requests with bodies
+receive the redirect immediately and close the HTTP connection without consuming
+the upload. HTTPS and the HTTP admin listener retain their normal behavior.
+Redirect and HTTPS connections share the worker's public connection and admission
+budgets. Shutdown closes both public listeners.
+
+The flag requires configured TLS credentials; enabling it without HTTPS fails
+before binding with `HttpsRequired`. Incomplete or invalid credentials and
+conflicting listener ports also fail startup. Embedded servers use
+`Config.http_redirect` and `Config.http_redirect_port`; `Server.httpRedirectPort()`
+returns the bound HTTP port, or null when redirects are disabled.
+
 The default build bundles OpenSSL 3.5.8 LTS, including its default and base
 providers, threading, and x86-64 assembly acceleration. It reads the default
 configuration from `/etc/ssl/openssl.cnf` (overridable with `OPENSSL_CONF`), but

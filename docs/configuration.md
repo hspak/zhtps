@@ -137,6 +137,7 @@ remain shared. Use separate servers when independent admission capacity is requi
 | `--http2-memory-bytes` | Automatic, up to 64 MiB per worker | Protocol, transport, stream, and cached allocations; see [HTTP/2](http2.md). |
 | Header / body / write / idle timeouts | 5 s / 30 s / 5 s / 15 s | Each has a `--*-timeout-ms` option; lane deadlines also apply to generated endpoints. |
 | `--tls-handshake-timeout-ms` | 5 s | Separate from the first request's header deadline. |
+| `--http-redirect` / `--http-redirect-port` | Disabled / 80 | Separate HTTP listener redirecting to the HTTPS public port; requires TLS credentials. See [TLS](tls.md). |
 | `--max-requests` | 1,000 per connection | Increase for long-running reuse workloads if connection turnover is unnecessary. |
 | `--idle-reclaim-ms` | 0 (disabled) | A nonzero age must be less than the idle timeout. |
 | `--completion-budget` | 64 | Start here; change only with evidence about fairness or event-loop overhead. |

@@ -20,6 +20,8 @@ pub fn main(init: std.process.Init) !void {
                 "  --port PORT                  default 8080; 0 chooses a free port\n" ++
                 "  --tls-certificate PATH       PEM chain; enables HTTPS with --tls-key\n" ++
                 "  --tls-key PATH               unencrypted PEM private key\n" ++
+                "  --http-redirect              redirect HTTP to HTTPS; requires TLS credentials\n" ++
+                "  --http-redirect-port PORT    HTTP redirect listener; default 80; 0 chooses a free port\n" ++
                 "  --tls-handshake-timeout-ms N  default 5000\n" ++
                 "  --http2-max-streams N         per connection; default 100\n" ++
                 "  --http2-worker-streams N      active/retained streams per worker; default auto\n" ++

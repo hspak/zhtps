@@ -112,6 +112,7 @@ pub fn Server(comptime App: type) type {
                 if (id == 0) {
                     resolved.port = item.listener.port;
                     resolved.admin_port = item.admin_listener.port;
+                    resolved.http_redirect_port = item.redirect_listener.port;
                     item.config = resolved;
                 }
             }
@@ -133,6 +134,13 @@ pub fn Server(comptime App: type) type {
         /// Available as soon as init succeeds.
         pub fn adminPort(self: *const Self) ?u16 {
             const listener = self.shared.workers[0].admin_listener;
+            return if (listener.fd >= 0) listener.port else null;
+        }
+
+        /// Returns the bound HTTP redirect port, or null when http_redirect is false.
+        /// Available as soon as init succeeds, including when zero selected a free port.
+        pub fn httpRedirectPort(self: *const Self) ?u16 {
+            const listener = self.shared.workers[0].redirect_listener;
             return if (listener.fd >= 0) listener.port else null;
         }
 

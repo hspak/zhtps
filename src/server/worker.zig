@@ -35,6 +35,32 @@ fn defaultAuthority(buffer: *[64]u8, address: []const u8, port: u16, default_por
     return writer.buffered();
 }
 
+// Inputs come from a parsed request. Keep the raw path/query and replace only
+// the authority's port; bracketed IPv6 literals retain their internal colons.
+fn writeHttpsLocation(
+    writer: *std.Io.Writer,
+    authority: []const u8,
+    target: []const u8,
+    port: u16,
+) (std.Io.Writer.Error || error{InvalidTarget})!void {
+    var path_query = target;
+    if (!std.mem.startsWith(u8, target, "/")) {
+        const scheme_end = std.mem.indexOf(u8, target, "://") orelse return error.InvalidTarget;
+        const rest = target[scheme_end + 3 ..];
+        const path_start = std.mem.indexOfAny(u8, rest, "/?") orelse rest.len;
+        path_query = rest[path_start..];
+    }
+    const host_end = if (std.mem.startsWith(u8, authority, "["))
+        std.mem.indexOfScalar(u8, authority, ']').? + 1
+    else
+        std.mem.indexOfScalar(u8, authority, ':') orelse authority.len;
+    try writer.writeAll("https://");
+    try writer.writeAll(authority[0..host_end]);
+    if (port != 443) try writer.print(":{d}", .{port});
+    if (path_query.len == 0 or path_query[0] == '?') try writer.writeByte('/');
+    try writer.writeAll(path_query);
+}
+
 // Only IP listeners supply these addresses. The longest unscoped IPv6 literal
 // occupies 39 bytes; formatting omits the peer port and needs no I/O.
 fn formatClientIp(buffer: *[39]u8, address: *const linux.sockaddr.storage) []const u8 {
@@ -126,6 +152,7 @@ pub fn Worker(comptime App: type) type {
         ring: linux.IoUring,
         listener: platform.Listener,
         admin_listener: platform.Listener,
+        redirect_listener: platform.Listener = .{ .fd = -1, .port = 80 },
         connections: []Connection,
         batches: []ResponseBatch = &.{},
         free_batch: ?*ResponseBatch = null,
@@ -150,11 +177,13 @@ pub fn Worker(comptime App: type) type {
         pending: usize = 0,
         accepting: bool = false,
         admin_accepting: bool = false,
+        redirect_accepting: bool = false,
         // Each listener has at most one accept in flight. Public peer storage
         // also stays unchanged while waiting_accept waits for a reclaimed slot.
-        accept_peers: [2]AcceptPeer = @splat(.{}),
+        accept_peers: [3]AcceptPeer = @splat(.{}),
         accept_retry_ns: u64 = 0,
         admin_retry_ns: u64 = 0,
+        redirect_retry_ns: u64 = 0,
         ticking: bool = false,
         logging: bool = false,
         application_event_pending: bool = false,
@@ -203,6 +232,12 @@ pub fn Worker(comptime App: type) type {
         };
 
         const no_log_owner = std.math.maxInt(u32);
+
+        const Listener = enum {
+            public,
+            admin,
+            redirect,
+        };
 
         const AcceptPeer = struct {
             address: linux.sockaddr.storage = undefined,
@@ -270,6 +305,7 @@ pub fn Worker(comptime App: type) type {
         const Kind = enum(u8) {
             accept,
             accept_admin,
+            accept_redirect,
             tick,
             log_write,
             application,
@@ -279,6 +315,7 @@ pub fn Worker(comptime App: type) type {
             cancel_send,
             cancel_accept,
             cancel_admin,
+            cancel_redirect,
             cancel_tick,
             cancel_log,
             cancel_application,
@@ -298,6 +335,7 @@ pub fn Worker(comptime App: type) type {
             active_position: usize = 0,
             generation: u32 = 0,
             admin: bool = false,
+            redirect: bool = false,
             phase: Phase = .reading,
             // Public requests borrow a worker lease through response cleanup.
             // Admin leases are reserved at initialization and never shared.
@@ -656,6 +694,7 @@ pub fn Worker(comptime App: type) type {
                 .stream_queue_bytes = completion_bytes,
                 .worker_fds = if (isolated_application) 4 else 3,
             };
+            if (config.http_redirect) requirements.worker_fds += 1;
             if (config.log_fd != null) requirements.worker_bytes +|= config.log_slots *| @sizeOf(Logger.Slot);
             if (comptime can_batch) requirements.worker_bytes +|= config.response_batches *| @sizeOf(ResponseBatch);
             for (fullCapacities(config)) |size| {
@@ -800,6 +839,12 @@ pub fn Worker(comptime App: type) type {
                     .address = self.config.address,
                     .port = self.listener.port,
                 });
+                if (self.redirect_listener.fd >= 0) self.logger.emit(.{
+                    .timestamp_ns = platform.realtimeNs(self.io),
+                    .event = "http_redirect_listening",
+                    .address = self.config.address,
+                    .port = self.redirect_listener.port,
+                });
                 if (self.admin_listener.fd >= 0) self.logger.emit(.{
                     .timestamp_ns = platform.realtimeNs(self.io),
                     .event = "admin_listening",
@@ -883,6 +928,16 @@ pub fn Worker(comptime App: type) type {
                 },
             );
             errdefer if (!transferred) platform.close(listener.fd);
+            if (config.http_redirect and listener.port == config.http_redirect_port)
+                return error.InvalidOption;
+            const redirect_listener = if (config.http_redirect)
+                try platform.listen(config.address, config.http_redirect_port, .{
+                    .reuse_port = true,
+                    .thin_linear_timeouts = config.tcp_retries == .thin_linear,
+                })
+            else
+                platform.Listener{ .fd = -1, .port = config.http_redirect_port };
+            errdefer if (!transferred and redirect_listener.fd >= 0) platform.close(redirect_listener.fd);
             const admin_listener = if (worker_id == 0 and config.admin_connections > 0)
                 try platform.listen(config.admin_address, config.admin_port, .{ .backlog = 32 })
             else
@@ -942,6 +997,7 @@ pub fn Worker(comptime App: type) type {
                 .ring = ring,
                 .listener = listener,
                 .admin_listener = admin_listener,
+                .redirect_listener = redirect_listener,
                 .connections = connections,
                 .batches = batches,
                 .active_slots = active_slots,
@@ -1320,6 +1376,7 @@ pub fn Worker(comptime App: type) type {
             for (&self.buffer_pools) |*pool| pool.deinit(self.gpa);
             self.connection_buffers.deinit(self.gpa);
             platform.close(self.listener.fd);
+            if (self.redirect_listener.fd >= 0) platform.close(self.redirect_listener.fd);
             if (self.admin_listener.fd >= 0) platform.close(self.admin_listener.fd);
             if (self.application_event_fd >= 0) platform.close(self.application_event_fd);
             self.gpa.free(self.log_slots);
@@ -1373,8 +1430,9 @@ pub fn Worker(comptime App: type) type {
                 if (self.shouldStop() and !self.draining) try self.beginShutdown(begin_ns);
                 if (!self.stopping) {
                     if (!self.draining) {
-                        try self.queueAccept(false);
-                        if (self.admin_listener.fd >= 0) try self.queueAccept(true);
+                        try self.queueAccept(.public);
+                        if (self.redirect_listener.fd >= 0) try self.queueAccept(.redirect);
+                        if (self.admin_listener.fd >= 0) try self.queueAccept(.admin);
                     }
                     if (!self.ticking) {
                         try self.ensureSubmission();
@@ -1429,7 +1487,7 @@ pub fn Worker(comptime App: type) type {
             std.debug.assert(self.pending > 0);
             self.pending -= 1;
             const kind: Kind = @enumFromInt(@as(u8, @truncate(completion.user_data)));
-            if ((kind == .accept or kind == .accept_admin) and completion.res >= 0)
+            if ((kind == .accept or kind == .accept_admin or kind == .accept_redirect) and completion.res >= 0)
                 platform.close(completion.res);
         }
 
@@ -1460,11 +1518,13 @@ pub fn Worker(comptime App: type) type {
             const controls = [_]Kind{
                 .accept,
                 .accept_admin,
+                .accept_redirect,
                 .tick,
                 .log_write,
                 .application,
                 .cancel_accept,
                 .cancel_admin,
+                .cancel_redirect,
                 .cancel_tick,
                 .cancel_log,
                 .cancel_application,
@@ -1483,10 +1543,17 @@ pub fn Worker(comptime App: type) type {
             }
         }
 
-        fn queueAccept(self: *Self, admin: bool) RunError!void {
+        fn queueAccept(self: *Self, listener: Listener) RunError!void {
             if (self.shouldStop()) return;
-            if (if (admin) self.admin_accepting else self.accepting) return;
-            if (!admin and self.waiting_accept >= 0) {
+            const admin = listener == .admin;
+            const accepting = switch (listener) {
+                .public => &self.accepting,
+                .admin => &self.admin_accepting,
+                .redirect => &self.redirect_accepting,
+            };
+            if (accepting.*) return;
+            if (listener == .redirect and self.waiting_accept >= 0) return;
+            if (listener == .public and self.waiting_accept >= 0) {
                 const now = platform.monotonicNs();
                 if (now >= self.waiting_deadline_ns) {
                     platform.close(self.waiting_accept);
@@ -1507,18 +1574,30 @@ pub fn Worker(comptime App: type) type {
                 if (self.public_free != null) {
                     const fd = self.waiting_accept;
                     self.waiting_accept = -1;
-                    try self.acceptConnection(fd, false);
+                    try self.acceptConnection(fd, .public);
                 }
                 return;
             }
-            const retry_ns = if (admin) self.admin_retry_ns else self.accept_retry_ns;
+            const retry_ns = switch (listener) {
+                .public => self.accept_retry_ns,
+                .admin => self.admin_retry_ns,
+                .redirect => self.redirect_retry_ns,
+            };
             if (retry_ns != 0 and platform.monotonicNs() < retry_ns) return;
             if (self.freeSlot(admin) == null and
-                (admin or self.idleCandidate(platform.monotonicNs()) == null)) return;
-            const kind: Kind = if (admin) .accept_admin else .accept;
-            const fd = if (admin) self.admin_listener.fd else self.listener.fd;
+                (listener != .public or self.idleCandidate(platform.monotonicNs()) == null)) return;
+            const kind: Kind = switch (listener) {
+                .public => .accept,
+                .admin => .accept_admin,
+                .redirect => .accept_redirect,
+            };
+            const fd = switch (listener) {
+                .public => self.listener.fd,
+                .admin => self.admin_listener.fd,
+                .redirect => self.redirect_listener.fd,
+            };
             try self.ensureSubmission();
-            const peer = &self.accept_peers[@intFromBool(admin)];
+            const peer = &self.accept_peers[@intFromEnum(listener)];
             peer.address_len = @sizeOf(@TypeOf(peer.address));
             _ = self.ring.accept(
                 control(kind),
@@ -1527,7 +1606,7 @@ pub fn Worker(comptime App: type) type {
                 if (self.config.access_log) &peer.address_len else null,
                 linux.SOCK.CLOEXEC,
             ) catch return error.IoUringResources;
-            if (admin) self.admin_accepting = true else self.accepting = true;
+            accepting.* = true;
             self.queued();
         }
 
@@ -1646,9 +1725,27 @@ pub fn Worker(comptime App: type) type {
                 .result = completion.res,
             });
             switch (kind) {
-                .accept, .accept_admin => {
-                    const admin = kind == .accept_admin;
-                    if (admin) self.admin_accepting = false else self.accepting = false;
+                .accept, .accept_admin, .accept_redirect => {
+                    const listener: Listener = switch (kind) {
+                        .accept => .public,
+                        .accept_admin => .admin,
+                        .accept_redirect => .redirect,
+                        else => unreachable, // This prong handles only accept completions.
+                    };
+                    const retry_ns = switch (listener) {
+                        .public => retry: {
+                            self.accepting = false;
+                            break :retry &self.accept_retry_ns;
+                        },
+                        .admin => retry: {
+                            self.admin_accepting = false;
+                            break :retry &self.admin_retry_ns;
+                        },
+                        .redirect => retry: {
+                            self.redirect_accepting = false;
+                            break :retry &self.redirect_retry_ns;
+                        },
+                    };
                     if (completion.res < 0) {
                         if (completion.res == -@as(i32, @intFromEnum(linux.E.CANCELED))) return;
                         // Shutting down a listener can finish its pending accept
@@ -1663,7 +1760,7 @@ pub fn Worker(comptime App: type) type {
                         // Descriptor/memory exhaustion must not become a loop
                         // of immediately failing accepts that consumes the CPU.
                         const retry = platform.monotonicNs() + 100_000_000;
-                        if (admin) self.admin_retry_ns = retry else self.accept_retry_ns = retry;
+                        retry_ns.* = retry;
                         self.logger.emit(.{
                             .timestamp_ns = platform.realtimeNs(self.io),
                             .level = .warn,
@@ -1673,8 +1770,8 @@ pub fn Worker(comptime App: type) type {
                         });
                         return;
                     }
-                    if (admin) self.admin_retry_ns = 0 else self.accept_retry_ns = 0;
-                    try self.acceptConnection(completion.res, admin);
+                    retry_ns.* = 0;
+                    try self.acceptConnection(completion.res, listener);
                 },
                 .tick => {
                     self.ticking = false;
@@ -1701,6 +1798,7 @@ pub fn Worker(comptime App: type) type {
                 },
                 .cancel_accept,
                 .cancel_admin,
+                .cancel_redirect,
                 .cancel_tick,
                 .cancel_log,
                 .cancel_application,
@@ -1746,13 +1844,14 @@ pub fn Worker(comptime App: type) type {
             }
         }
 
-        fn acceptConnection(self: *Self, fd: linux.fd_t, admin: bool) RunError!void {
+        fn acceptConnection(self: *Self, fd: linux.fd_t, listener: Listener) RunError!void {
+            const admin = listener == .admin;
             if (self.draining or self.shouldStop()) {
                 platform.close(fd);
                 return;
             }
             const index = self.freeSlot(admin) orelse {
-                if (!admin and self.config.idle_reclaim_ms != 0 and self.waiting_accept < 0) {
+                if (listener == .public and self.config.idle_reclaim_ms != 0 and self.waiting_accept < 0) {
                     self.waiting_accept = fd;
                     self.waiting_deadline_ns = platform.monotonicNs() +
                         @as(u64, self.config.close_timeout_ms) * 1_000_000;
@@ -1773,14 +1872,16 @@ pub fn Worker(comptime App: type) type {
                 platform.close(fd);
                 self.metrics.recorder().add(.connections_refused_total, 1);
                 self.accept_retry_ns = platform.monotonicNs() + 100_000_000;
+                self.redirect_retry_ns = self.accept_retry_ns;
                 return;
             }
             if (admin) self.admin_free = connection.next_free else self.public_free = connection.next_free;
             connection.next_free = null;
             connection.fd = fd;
+            connection.redirect = listener == .redirect;
             connection.client_ip_len = if (self.config.access_log) @intCast(formatClientIp(
                 &connection.client_ip,
-                &self.accept_peers[@intFromBool(admin)].address,
+                &self.accept_peers[@intFromEnum(listener)].address,
             ).len) else 0;
             connection.generation +%= 1;
             connection.phase = .reading;
@@ -1802,7 +1903,7 @@ pub fn Worker(comptime App: type) type {
             self.active_connections += 1;
             self.metrics.recorder().add(.connections_accepted_total, 1);
             self.event(index, .debug, "connection_accepted", null);
-            if (!admin and self.config.tls != null) {
+            if (listener == .public and self.config.tls != null) {
                 connection.tls = self.createTls() catch |err| {
                     self.metrics.recorder().add(.tls_errors_total, 1);
                     self.event(index, .warn, "tls_error", @errorName(err));
@@ -2432,6 +2533,10 @@ pub fn Worker(comptime App: type) type {
                                     return;
                                 },
                             }
+                            if (connection.redirect) {
+                                try self.redirectHttp(index);
+                                return;
+                            }
                             // Rejected heads never consume body-storage leases.
                             // Admin buffers already have their full capacity.
                             if (request.chunked) {
@@ -2699,6 +2804,31 @@ pub fn Worker(comptime App: type) type {
                 @as(u64, self.config.write_timeout_ms) * 1_000_000);
             self.metrics.recorder().response(100);
             try self.queueSend(index);
+        }
+
+        fn redirectHttp(self: *Self, index: usize) RunError!void {
+            const connection = &self.connections[index];
+            const request = &connection.parser.request;
+            // No application is dispatched. Location is copied
+            // into the output buffer synchronously before startResponse returns.
+            var writer: std.Io.Writer = .fixed(connection.application_buffer);
+            writeHttpsLocation(&writer, request.authority, request.target, self.listener.port) catch |err| {
+                switch (err) {
+                    error.InvalidTarget => return self.reject(index, 400, "redirect_target"),
+                    error.WriteFailed => {
+                        if (!self.ensureBuffer(connection, .application)) return self.bufferUnavailable(index);
+                        writer = .fixed(connection.application_buffer);
+                        writeHttpsLocation(&writer, request.authority, request.target, self.listener.port) catch
+                            return self.reject(index, 414, "redirect_target");
+                    },
+                }
+            };
+            try self.startResponse(index, .{
+                .status = 308,
+                .headers = &.{.{ .name = "Location", .value = writer.buffered() }},
+                // An early redirect never consumes an upload or sends 100 Continue.
+                .close = request.hasBody(),
+            });
         }
 
         fn respondStatus(self: *Self, index: usize, status: u16, close: bool) RunError!void {
@@ -3932,6 +4062,8 @@ pub fn Worker(comptime App: type) type {
             // reference. Keep descriptors until deinit so unsubmitted SQEs
             // cannot target a reused descriptor.
             _ = linux.shutdown(self.listener.fd, linux.SHUT.RDWR);
+            if (self.redirect_listener.fd >= 0)
+                _ = linux.shutdown(self.redirect_listener.fd, linux.SHUT.RDWR);
             if (self.admin_listener.fd >= 0)
                 _ = linux.shutdown(self.admin_listener.fd, linux.SHUT.RDWR);
         }
@@ -3952,6 +4084,7 @@ pub fn Worker(comptime App: type) type {
             self.logger.emit(.{ .timestamp_ns = platform.realtimeNs(self.io), .event = "shutdown_started" });
             if (self.accepting) try self.cancelControl(.cancel_accept, .accept);
             if (self.admin_accepting) try self.cancelControl(.cancel_admin, .accept_admin);
+            if (self.redirect_accepting) try self.cancelControl(.cancel_redirect, .accept_redirect);
             for (self.connections, 0..) |*connection, index| {
                 if (connection.fd < 0) continue;
                 if (connection.http2) |session| {
@@ -4003,6 +4136,17 @@ test {
     _ = http2;
 }
 
+test "HTTPS redirect omits the default port and preserves IPv6 brackets" {
+    const testing = std.testing;
+    var buffer: [128]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&buffer);
+    try writeHttpsLocation(&writer, "example.test:8080", "/path?", 443);
+    try testing.expectEqualStrings("https://example.test/path?", writer.buffered());
+    writer = .fixed(&buffer);
+    try writeHttpsLocation(&writer, "[2001:db8::1]:80", "http://[2001:db8::1]:80", 443);
+    try testing.expectEqualStrings("https://[2001:db8::1]/", writer.buffered());
+}
+
 test "stop observed before the next loop rejects an already completed accept" {
     const testing = std.testing;
     const TestServer = Worker(application);
@@ -4042,9 +4186,9 @@ test "stop observed before the next loop rejects an already completed accept" {
     // Model a signal between CQ collection and dispatch. acceptConnection owns
     // the accepted descriptor on every path, including shutdown rejection.
     stop.store(true, .monotonic);
-    try server.acceptConnection(accepted, false);
+    try server.acceptConnection(accepted, .public);
     try testing.expectEqual(@as(usize, 0), server.active_connections);
-    try server.queueAccept(false);
+    try server.queueAccept(.public);
     try testing.expectEqual(@as(usize, 0), server.pending);
 }
 

@@ -119,6 +119,108 @@ class TlsTests(unittest.TestCase):
             self.assertEqual(status, 200)
             return json.loads(body)
 
+    def redirect_port(self, server):
+        with Client(server.admin_port) as client:
+            client.send(b"GET /debug/config HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            status, _, body = client.response()
+            self.assertEqual(status, 200)
+            return json.loads(body)["http_redirect_port"]
+
+    def test_http_redirect_requires_https_before_listening(self):
+        result = subprocess.run([BINARY, "--http-redirect"], capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(b"HttpsRequired", result.stderr)
+        self.assertNotIn(b'"event":"listening"', result.stderr)
+
+    def test_http_redirect_preserves_target_and_https_serves_normally(self):
+        with Running(*self.options, "--http-redirect", "--http-redirect-port", "0",
+                     "--workers", "2") as server:
+            port = self.redirect_port(server)
+            cases = (
+                (b"/a%2Fb/../c?x=%2F&y=1", b"example.test:1234", b"example.test", b"/a%2Fb/../c?x=%2F&y=1"),
+                (b"//other.test/path?", b"example.test", b"example.test", b"//other.test/path?"),
+                (b"/", b"[::1]:8080", b"[::1]", b"/"),
+                (b"http://example.test:1234/a?b", b"ignored.test", b"example.test", b"/a?b"),
+                (b"http://example.test?", b"ignored.test", b"example.test", b"/?"),
+                (b"/", b"", b"127.0.0.1", b"/"),
+                (b"/" + b"a" * 8000, b"localhost", b"localhost", b"/" + b"a" * 8000),
+            )
+            for target, host, destination, suffix in cases:
+                with self.subTest(target=target, host=host), Client(port) as client:
+                    client.send(b"GET " + target + b" HTTP/1.1\r\nHost: " + host + b"\r\n\r\n")
+                    status, fields, body = client.response()
+                    self.assertEqual((status, body), (308, b""))
+                    self.assertEqual(fields[b"location"], b"https://" + destination
+                                     + f":{server.port}".encode() + suffix)
+            with Client(port) as client:
+                client.send(b"GET / HTTP/1.0\r\n\r\n")
+                self.assertEqual(client.response()[1][b"location"],
+                                 f"https://127.0.0.1:{server.port}/".encode())
+            with self.client(server) as client:
+                client.send(REQUEST)
+                self.assertEqual(client.response()[0], 200)
+            with Client(server.admin_port) as client:
+                client.send(b"GET /debug/metrics HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                self.assertEqual(client.response()[0], 200)
+
+    def test_http_redirect_precedes_continue_and_application_dispatch(self):
+        with Running(*self.options, "--http-redirect", "--http-redirect-port", "0") as server:
+            port = self.redirect_port(server)
+            for framing in (b"Content-Length: 100", b"Transfer-Encoding: chunked"):
+                with self.subTest(framing=framing), Client(port) as client:
+                    client.send(b"POST /echo?upload=1 HTTP/1.1\r\nHost: localhost\r\n"
+                                + framing + b"\r\nExpect: 100-continue\r\n\r\n")
+                    status, fields, body = client.response()
+                    self.assertEqual((status, body), (308, b""))
+                    self.assertEqual(fields[b"connection"], b"close")
+                    self.assertEqual(fields[b"location"],
+                                     f"https://localhost:{server.port}/echo?upload=1".encode())
+
+    def test_http_redirect_keepalive_and_invalid_requests(self):
+        with Running(*self.options, "--http-redirect", "--http-redirect-port", "0") as server:
+            port = self.redirect_port(server)
+            with Client(port) as client:
+                client.send(REQUEST * 3 + b"HEAD /missing HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                for _ in range(4):
+                    self.assertEqual(client.response()[0], 308)
+            for request, expected in (
+                (b"GET / HTTP/1.1\r\n\r\n", 400),
+                (b"GET / HTTP/1.1\r\nHost: evil/path\r\n\r\n", 400),
+                (b"GET https://localhost/ HTTP/1.1\r\nHost: localhost\r\n\r\n", 421),
+                (b"CONNECT localhost:80 HTTP/1.1\r\nHost: localhost\r\n\r\n", 400),
+                (b"OPTIONS * HTTP/1.1\r\nHost: localhost\r\n\r\n", 400),
+            ):
+                with self.subTest(request=request), Client(port) as client:
+                    client.send(request)
+                    status, fields, _ = client.response()
+                    self.assertEqual(status, expected)
+                    self.assertNotIn(b"location", fields)
+
+    def test_http_redirect_bind_failure_stops_startup(self):
+        with socket.socket() as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            occupied.listen()
+            result = subprocess.run([
+                BINARY, *self.options, "--port", "0", "--http-redirect",
+                "--http-redirect-port", str(occupied.getsockname()[1]),
+                "--workers", "2", "--max-connections", "2",
+            ], capture_output=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"AddressInUse", result.stderr)
+            self.assertNotIn(b'"event":"listening"', result.stderr)
+
+    def test_http_redirect_skips_embedded_handlers(self):
+        with self.application("--http-redirect", "--http-redirect-port", "0") as server:
+            port = self.redirect_port(server)
+            with Client(port) as client:
+                client.send(b"GET /origin HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                status, fields, body = client.response()
+                self.assertEqual((status, body), (308, b""))
+                self.assertEqual(fields[b"location"], f"https://localhost:{server.port}/origin".encode())
+            with self.client(server) as client:
+                client.send(b"GET /origin HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                self.assertEqual(json.loads(client.response()[2])["scheme"], "https")
+
     def test_verified_https_keepalive_pipeline_and_stream(self):
         with self.client() as client:
             self.assertEqual(client.socket.version(), "TLSv1.3")
@@ -325,6 +427,15 @@ class TlsTests(unittest.TestCase):
             self.skipTest("run zig build test-tls to include the embedded application fixture")
         result = subprocess.run([FIXTURE, "--check-allocations", "--port", "0", *self.options],
                                 capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_http_redirect_initialization_unwinds_all_allocator_failures(self):
+        if FIXTURE is None:
+            self.skipTest("run zig build test-tls to include the embedded application fixture")
+        result = subprocess.run([
+            FIXTURE, "--check-allocations", "--port", "0", *self.options,
+            "--http-redirect", "--http-redirect-port", "0",
+        ], capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_large_response_survives_partial_sends_and_shutdown(self):

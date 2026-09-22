@@ -144,6 +144,11 @@ workload. The standalone executable accepts all of the flags below.
   requires `--tls-key` to enable HTTPS on the public listener.
 - `--tls-key PATH` (default: unset): Unencrypted PEM private key matching
   `--tls-certificate`; both paths are required for TLS.
+- `--http-redirect` (default: disabled): Enable an HTTP listener that sends 308
+  redirects to HTTPS. Requires both TLS credentials; otherwise startup fails.
+- `--http-redirect-port PORT` (default: `80`): Redirect listener port on `--address`;
+  `0` chooses a free port. Used only with `--http-redirect`; must differ from the
+  HTTPS `--port`. Redirects preserve the hostname, raw path, and query string.
 - `--tls-handshake-timeout-ms N` (default: `5000`): TLS handshake deadline in
   milliseconds; requires the certificate and key options.
 
