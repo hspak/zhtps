@@ -13,6 +13,7 @@ zig build test-wire
 zig build test-resources
 zig build test-deploy
 zig build test-tls
+zig build test-victoria-logs
 zig build test-application test-upload test-response-streaming
 zig build test -Dtest-filter='fuzz framing' -Derror-tracing=false --fuzz=100K
 python3 tests/load.py --port 8080 --rate 1000 --duration 10 --connections 32
@@ -23,6 +24,14 @@ The load/sweep and HTTP/1 wire tools require Python 3.11 or later and use only i
 standard library. TLS tests also invoke OpenSSL; the HTTP/2 suite requires the
 packages in `tests/requirements-http2.txt`. See [HTTP/2 verification](http2.md#verification)
 for environment setup and the `zig build test-http2` command.
+
+The VictoriaLogs suite uses a local HTTP collector and OpenSSL-generated test
+credentials. It checks batching, timestamp and stream-field mapping, escaping,
+stderr suppression, option conflicts, collector failures, certificate rejection,
+and bounded shutdown. Trusted HTTPS and hostname verification also run when
+`bwrap` and user mount namespaces are available; they mount an isolated test CA
+bundle without modifying the system trust store. It does not require a running
+VictoriaLogs installation.
 
 Automatic sizing tests launch the real server with restricted CPU affinity and
 descriptor limits, check the effective config, and serve HTTP requests. In-file

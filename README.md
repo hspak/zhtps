@@ -227,9 +227,34 @@ All timeout and age values below are in milliseconds.
 
 - `--log-slots N` (default: `256`): Buffered JSON log records per worker.
 - `--no-access-log` (default: off; access logging enabled): Omit per-response logs
-  while retaining metrics and other events.
+  while retaining metrics and other events. `--no-access-logs` is an alias.
+- `--victoria-logs http(s)://HOST[:PORT]` (default: unset): Post all structured
+  logs directly to VictoriaLogs and disable stderr logging. Mutually exclusive
+  with both spellings of `--no-access-log`. Supply an origin, optionally ending
+  in `/`, without credentials, a path, query, or fragment. HTTPS verifies the
+  collector certificate using the system trust store.
 - `--verbose` (default: off): Include JSON debug events.
 - `--help` (default: off): Print usage and exit; pass this flag alone.
+
+For example, `zhtps --victoria-logs http://127.0.0.1:9428` sends NDJSON batches
+to `/insert/jsonline`. Following the [VictoriaLogs data model](https://docs.victoriametrics.com/victorialogs/keyconcepts/#data-model),
+ingestion maps `event` to `_msg` and the original Unix nanosecond `timestamp_ns`
+to `_time`. Stream fields are `app=zhtps`, the machine hostname (`host`), and the
+bound public listener address and port (`instance`). All workers share that
+stream. Client IPs, request IDs, status codes, routes, and other changing fields
+remain ordinary searchable fields. VictoriaLogs flattens custom `fields` into
+`fields.NAME` and converts numeric and boolean values to strings.
+
+Posting uses a background sender, a bounded pipe, and batches of up to 256 KiB;
+HTTP event loops never wait on the collector. Idle polling adds up to 50 ms before
+posting. Each POST has a two-second deadline. Failed batches are dropped without
+retry, followed by a one-second backoff; no stderr fallback occurs. Monitor
+`log_write_errors_total` and `log_dropped_total` through the admin metrics endpoint.
+Delivery errors count on worker zero; `log_pending` covers worker queues, excluding
+the pipe and current HTTP batch. Full queues drop new records. Shutdown allows
+up to two additional seconds to drain remaining logs. Delivery is best effort,
+with no durable spool or exactly-once guarantee. Invalid command-line options
+still produce an error on stderr before a logging destination is configured.
 
 Embedded applications also configure lanes and buffer sizes through the Zig API.
 Each lane defaults to `threads = 1`, `queue = 64`, and `timeout_ms = 100`; thread

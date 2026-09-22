@@ -55,12 +55,17 @@ pub fn main(init: std.process.Init) !void {
                 "  --max-chunk-framing-bytes N  cumulative chunk overhead; default 65536\n" ++
                 "  --max-requests N             per connection; default 1000\n" ++
                 "  --no-access-log              omit per-response logs; keep metrics\n" ++
+                "  --no-access-logs             alias for --no-access-log\n" ++
+                "  --victoria-logs URL           post logs to HTTP(S) origin; disable stderr logging\n" ++
                 "  --verbose                    include JSON debug events\n",
         );
         return;
     }
     const config = zhtps.Config.parse(args[1..]) catch |err| {
-        try fatal(init.io, @errorName(err));
+        try fatal(init.io, null, if (err == error.ConflictingLogOptions)
+            "--no-access-logs (--no-access-log) and --victoria-logs are mutually exclusive"
+        else
+            @errorName(err));
         std.process.exit(2);
     };
     const action: linux.Sigaction = .{
@@ -71,12 +76,33 @@ pub fn main(init: std.process.Init) !void {
     _ = try zhtps.platform.check(linux.sigaction(.TERM, &action, null));
     _ = try zhtps.platform.check(linux.sigaction(.INT, &action, null));
     zhtps.DefaultServer.run(init.gpa, init.io, config, &stopping) catch |err| {
-        try fatal(init.io, @errorName(err));
+        try fatal(init.io, config, @errorName(err));
         std.process.exit(1);
     };
 }
 
-fn fatal(io: std.Io, reason: []const u8) !void {
+fn fatal(io: std.Io, config: ?zhtps.Config, reason: []const u8) !void {
+    if (config) |options| if (options.victoria_logs) |url| {
+        var metrics: zhtps.Metrics = .{};
+        var sender: zhtps.Logger.VictoriaLogs = undefined;
+        sender.init(io, url, &metrics) catch return;
+        defer sender.deinit();
+        sender.setInstance(options.address, options.port) catch return;
+        var slots: [1]zhtps.Logger.Slot = undefined;
+        var logger: zhtps.Logger = undefined;
+        logger.init(&slots, &metrics, false);
+        logger.source = sender.source();
+        logger.emit(.{
+            .timestamp_ns = zhtps.platform.realtimeNs(io),
+            .level = .@"error",
+            .event = "startup_or_runtime_error",
+            .reason = reason,
+        });
+        sender.start() catch return;
+        var loggers = [_]*zhtps.Logger{&logger};
+        sender.finish(&loggers);
+        return;
+    };
     var buffer: [1024]u8 = undefined;
     var writer: std.Io.Writer = .fixed(&buffer);
     try std.json.Stringify.value(

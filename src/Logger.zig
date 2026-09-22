@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const Metrics = @import("Metrics.zig");
+pub const VictoriaLogs = @import("Logger/VictoriaLogs.zig");
 const Logger = @This();
 
 slots: []Slot = &.{},
@@ -11,6 +12,13 @@ enabled: bool = true,
 worker: u32 = 0,
 read_index: usize = 0,
 count: usize = 0,
+/// Stable server identity, borrowed until logging stops. Used only for direct ingestion.
+source: ?Source = null,
+
+pub const Source = struct {
+    host: []const u8,
+    instance: []const u8,
+};
 
 pub const Slot = struct {
     bytes: [2048]u8 = undefined,
@@ -89,7 +97,7 @@ pub fn emit(logger: *Logger, event: Event) void {
     var writer: std.Io.Writer = .fixed(&slot.bytes);
     var record = event;
     record.worker = logger.worker;
-    writeRecord(record, &writer) catch {
+    writeRecord(record, logger.source, &writer) catch {
         logger.metrics.add(.log_dropped_total, 1);
         return;
     };
@@ -104,12 +112,18 @@ pub fn emit(logger: *Logger, event: Event) void {
     logger.metrics.set(.log_pending, logger.count);
 }
 
-fn writeRecord(record: Event, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+fn writeRecord(record: Event, source: ?Source, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     try writer.print("{{\"timestamp_ns\":{d},\"level\":", .{record.timestamp_ns});
     try writeJsonString(@tagName(record.level), writer);
     try writer.writeAll(",\"event\":");
     try writeJsonString(record.event, writer);
     try writer.print(",\"worker\":{d}", .{record.worker});
+    if (source) |identity| {
+        try writer.writeAll(",\"app\":\"zhtps\",\"host\":");
+        try writeJsonString(identity.host, writer);
+        try writer.writeAll(",\"instance\":");
+        try writeJsonString(identity.instance, writer);
+    }
     if (record.connection) |value| try writer.print(
         ",\"conn_gen\":{d},\"conn_slot\":{d}",
         .{ value >> 32, (value >> 8) & 0xffffff },

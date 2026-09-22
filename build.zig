@@ -238,6 +238,11 @@ pub fn build(b: *std.Build) !void {
     consumer.setCwd(b.path("examples/embedded"));
     b.step("test-library", "Build and test a separate project importing zhtps").dependOn(&consumer.step);
     const wire = b.addSystemCommand(&.{ "python3", "tests/wire.py" });
+    const victoria_logs = b.addSystemCommand(&.{ "python3", "tests/victoria_logs.py" });
+    victoria_logs.addArtifactArg(exe);
+    b.step("test-victoria-logs", "Check direct log ingestion and collector failures").dependOn(
+        &victoria_logs.step,
+    );
     const tls_wire = b.addSystemCommand(&.{ "python3", "tests/tls.py" });
     tls_wire.addArtifactArg(exe);
     const tls_application = b.addExecutable(.{

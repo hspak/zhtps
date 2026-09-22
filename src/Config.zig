@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const Admission = @import("Admission.zig");
+const VictoriaLogs = @import("Logger.zig").VictoriaLogs;
 pub const Resources = @import("Config/Resources.zig");
 const Config = @This();
 
@@ -67,9 +68,12 @@ completion_budget: usize = 64,
 /// Zero disables aggregation. Custom applications use ordinary sends.
 response_batches: usize = 64,
 log_slots: usize = 256,
-/// Borrowed descriptor for JSON events; null disables logging. Keep it open
-/// until serving returns. Writers outside this server must coordinate access.
+/// Borrowed descriptor for JSON events; null disables logging unless victoria_logs
+/// is set. Keep it open until serving returns. Other writers must coordinate access.
 log_fd: ?i32 = 2,
+/// HTTP(S) origin for direct JSON ingestion. Borrows storage until server deinit;
+/// overrides log_fd and requires access_log. The server owns the posting transport.
+victoria_logs: ?[]const u8 = null,
 verbose: bool = false,
 access_log: bool = true,
 admission: AdmissionOptions = .{},
@@ -79,6 +83,9 @@ admission: AdmissionOptions = .{},
 pub const automatic = std.math.maxInt(usize);
 
 pub const Requirements = struct {
+    process_bytes: u64 = 0,
+    process_fds: usize = 0,
+    process_threads: usize = 0,
     worker_bytes: u64,
     connection_bytes: u64,
     admin_bytes: u64,
@@ -145,6 +152,8 @@ pub const AdmissionOptions = struct {
 };
 
 pub const Error = error{
+    InvalidVictoriaLogsUrl,
+    ConflictingLogOptions,
     InvalidOption,
     HttpsRequired,
     MissingArgument,
@@ -157,6 +166,10 @@ pub const Error = error{
 
 /// Rejects unsupported limits and listener combinations without allocating or binding.
 pub fn validate(config: Config) Error!void {
+    if (config.victoria_logs) |url| {
+        if (!config.access_log) return error.ConflictingLogOptions;
+        _ = try VictoriaLogs.parseOrigin(url);
+    }
     if (config.http_redirect) {
         if (config.tls == null) return error.HttpsRequired;
         if (config.port != 0 and config.http_redirect_port == config.port)
@@ -281,8 +294,9 @@ pub fn resolveResources(
     try config.validate();
     var result = config;
     const budget = config.memory_budget_bytes orelse detected.report.memory_available_bytes / 4;
+    const shared_bytes = requirements.admin_bytes +| requirements.process_bytes;
     if (budget == 0 or budget > detected.report.memory_available_bytes or
-        requirements.admin_bytes >= budget) return error.MemoryBudgetExceeded;
+        shared_bytes >= budget) return error.MemoryBudgetExceeded;
     const threads = std.math.add(usize, 1, requirements.lane_threads) catch return error.InvalidLimit;
     var resolution: Resolution = .{
         .detected = detected.report,
@@ -314,6 +328,7 @@ pub fn resolveResources(
     else
         config.max_connections;
     const descriptor_capacity = detected.report.nofile_limit -| detected.report.reserved_fds -|
+        requirements.process_fds -|
         config.admin_connections -| @as(u64, @intFromBool(config.admin_connections != 0));
     if (config.max_connections == automatic) {
         const count = descriptor_capacity / (requirements.worker_fds + minimum_connections);
@@ -324,7 +339,7 @@ pub fn resolveResources(
         }
     }
     if (detected.report.available_threads) |available| {
-        const count = (available +| 1) / threads;
+        const count = ((available +| 1) -| requirements.process_threads) / threads;
         if (result.workers > count) {
             if (!adjustable_workers or count == 0) return error.ThreadBudgetExceeded;
             result.workers = @intCast(count);
@@ -341,13 +356,13 @@ pub fn resolveResources(
         requirements.connection_bytes *| minimum_connections +|
         requirements.stream_queue_bytes *| minimum_streams;
     const minimum_worker = fixed_bytes +| minimum_large +| if (config.tls != null) minimum_http2 else 0;
-    const memory_workers = (budget - requirements.admin_bytes) / @max(1, minimum_worker);
+    const memory_workers = (budget - shared_bytes) / @max(1, minimum_worker);
     if (result.workers > memory_workers) {
         if (!adjustable_workers or memory_workers == 0) return error.MemoryBudgetExceeded;
         result.workers = @intCast(memory_workers);
         resolution.workers = .memory;
     }
-    const worker_budget = (budget - requirements.admin_bytes) / result.workers;
+    const worker_budget = (budget - shared_bytes) / result.workers;
     const flexible_bytes = worker_budget - minimum_worker;
     if (config.large_buffer_bytes == automatic)
         result.large_buffer_bytes = @intCast(@min(64 * 1024 * 1024, minimum_large + flexible_bytes / 4));
@@ -390,7 +405,7 @@ pub fn resolveResources(
             .implementation;
         if (result.max_connections < minimum_connections) return error.DescriptorBudgetTooSmall;
     }
-    resolution.estimated_bytes = requirements.admin_bytes +|
+    resolution.estimated_bytes = shared_bytes +|
         result.workers *| (worker_fixed +| requirements.connection_bytes *| result.max_connections);
     if (resolution.estimated_bytes > budget) return error.MemoryBudgetExceeded;
     if (explicit_cpus.len != 0) {
@@ -420,7 +435,7 @@ pub fn parse(args: []const []const u8) Error!Config {
             config.verbose = true;
             continue;
         }
-        if (std.mem.eql(u8, arg, "--no-access-log")) {
+        if (std.mem.eql(u8, arg, "--no-access-log") or std.mem.eql(u8, arg, "--no-access-logs")) {
             config.access_log = false;
             continue;
         }
@@ -431,7 +446,10 @@ pub fn parse(args: []const []const u8) Error!Config {
         if (i + 1 == args.len) return error.MissingArgument;
         i += 1;
         const value = args[i];
-        if (std.mem.eql(u8, arg, "--memory-budget-bytes")) {
+        if (std.mem.eql(u8, arg, "--victoria-logs")) {
+            config.victoria_logs = value;
+            config.log_fd = null;
+        } else if (std.mem.eql(u8, arg, "--memory-budget-bytes")) {
             config.memory_budget_bytes = if (std.mem.eql(u8, value, "auto"))
                 null
             else
@@ -1000,4 +1018,26 @@ test "admission overrides reject impossible concurrency and invalid bursts" {
     try testing.expectEqual(@as(usize, 1), options.max_active);
     try testing.expectEqual(@as(usize, 0), options.max_rejecting);
     try testing.expectEqual(@as(u32, 0), options.burst);
+}
+
+test "VictoriaLogs configuration validates embedded and command-line logging choices" {
+    const testing = std.testing;
+    try testing.expectError(error.ConflictingLogOptions, (Config{
+        .victoria_logs = "http://localhost:9428",
+        .access_log = false,
+    }).validate());
+    for ([_][]const u8{
+        "http://localhost:9428",
+        "https://logs.example.com/",
+        "http://127.0.0.1:9428",
+        "http://[::1]:9428",
+    }) |url| {
+        const config = try parse(&.{ "--victoria-logs", url });
+        try testing.expectEqualStrings(url, config.victoria_logs.?);
+        try testing.expect(config.log_fd == null);
+        try testing.expect(config.access_log);
+    }
+    const config = try parse(&.{"--no-access-logs"});
+    try testing.expect(!config.access_log);
+    try testing.expectEqual(@as(?i32, 2), config.log_fd);
 }

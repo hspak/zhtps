@@ -82,6 +82,13 @@ set it to a borrowed file descriptor to redirect JSON events, or null to disable
 them. The server never closes it. `admin_connections = 0` disables the admin
 listener; its default remains eight reserved slots on port 9090.
 
+Set `.victoria_logs = "http://127.0.0.1:9428"` to send logs directly instead.
+This overrides `log_fd`, requires `access_log = true`, and borrows the URL until
+`deinit`. The supplied I/O implementation must support cancellable concurrent
+network operations. The server owns the delivery pipe and sender; `serve` allows
+up to two additional seconds for final log delivery after workers stop. See the
+[logging options](../README.md#logging-and-help) for the schema and delivery limits.
+
 The [complete standalone consumer](../examples/embedded/main.zig) runs `serve` on
 a host-owned thread and shuts it down when Enter is pressed. Build or run it
 from `examples/embedded` with `zig build` or `zig build run`. Its tests import

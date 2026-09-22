@@ -695,7 +695,14 @@ pub fn Worker(comptime App: type) type {
                 .worker_fds = if (isolated_application) 4 else 3,
             };
             if (config.http_redirect) requirements.worker_fds += 1;
-            if (config.log_fd != null) requirements.worker_bytes +|= config.log_slots *| @sizeOf(Logger.Slot);
+            if (config.victoria_logs != null) {
+                // Sender, HTTP request, request deadline and final-drain deadline.
+                requirements.process_threads = 4;
+                requirements.process_fds = 4;
+                requirements.process_bytes = @sizeOf(Logger.VictoriaLogs) + 5 * 1024 * 1024;
+            }
+            if (config.log_fd != null or config.victoria_logs != null)
+                requirements.worker_bytes +|= config.log_slots *| @sizeOf(Logger.Slot);
             if (comptime can_batch) requirements.worker_bytes +|= config.response_batches *| @sizeOf(ResponseBatch);
             for (fullCapacities(config)) |size| {
                 const cached = @max(8, @min(64, 4 * 1024 * 1024 / size));
@@ -1679,8 +1686,12 @@ pub fn Worker(comptime App: type) type {
             try self.ensureSubmission();
             // Keep the selected prefix fixed across short writes so a worker
             // cannot extend its log ownership indefinitely as records arrive.
-            if (self.log_batch_remaining == 0)
-                self.log_batch_remaining = @min(self.logger.count, self.log_iovecs.len);
+            if (self.log_batch_remaining == 0) {
+                // Pipe writes must fit PIPE_BUF so cancellation cannot leave a
+                // partial JSON record before another worker or the final drain.
+                const batch_limit: usize = if (self.config.victoria_logs != null) 2 else self.log_iovecs.len;
+                self.log_batch_remaining = @min(self.logger.count, batch_limit);
+            }
             for (self.log_iovecs[0..self.log_batch_remaining], 0..) |*vector, index| {
                 const slot = self.logger.peekAt(index).?;
                 vector.* = .{ .base = slot.bytes[slot.sent..].ptr, .len = slot.len - slot.sent };
@@ -1786,8 +1797,14 @@ pub fn Worker(comptime App: type) type {
                 },
                 .log_write => {
                     self.logging = false;
+                    if (self.config.victoria_logs != null and completion.res == -@as(i32, @intFromEnum(linux.E.CANCELED))) {
+                        // Atomic pipe writes leave their records untouched on
+                        // cancellation; the sender drains these after workers join.
+                        self.releaseLog();
+                        return;
+                    }
                     if (completion.res <= 0) {
-                        self.metrics.recorder().add(.log_write_errors_total, 1);
+                        self.metrics.add(.log_write_errors_total, 1);
                         self.log_disabled = true;
                         self.releaseLog();
                         while (self.logger.peek() != null) self.logger.consume();
@@ -2056,7 +2073,7 @@ pub fn Worker(comptime App: type) type {
                 .rejected_duration_seconds, duration);
             if (!self.config.access_log or (stream.permit == .reject and !self.config.verbose)) return;
             if (comptime @hasDecl(App.Exchange, "takeAccessDrops")) {
-                if (stream.initialized) self.metrics.recorder().add(
+                if (stream.initialized) self.metrics.add(
                     .log_dropped_total,
                     stream.exchange.takeAccessDrops(),
                 );
@@ -3751,7 +3768,7 @@ pub fn Worker(comptime App: type) type {
             }
             if (self.config.access_log and (connection.permit != .reject or self.config.verbose)) {
                 if (@hasDecl(App.Exchange, "takeAccessDrops") and connection.application_initialized) {
-                    self.metrics.recorder().add(
+                    self.metrics.add(
                         .log_dropped_total,
                         connection.exchange.takeAccessDrops(),
                     );
