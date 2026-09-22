@@ -100,6 +100,28 @@ class VictoriaMetricsTests(unittest.TestCase):
                 timestamps.append(timestamp)
             self.assertGreaterEqual(timestamps[1] - timestamps[0], 10_000)
 
+    def test_no_content_without_length_reuses_connection(self):
+        # Real VictoriaMetrics omits Content-Length on its bodyless 204 reply.
+        with Collector(content_length=False) as collector:
+            with Running("--victoria-metrics", collector.url, "--no-access-log") as server:
+                wait_for(lambda: counters(server)["metrics_pushes_total"] > 0)
+                request(server.port)
+                wait_for(lambda: counters(server)["metrics_pushes_total"] >= 2, timeout=14)
+                self.assertEqual(counters(server)["metrics_push_errors_total"], 0)
+            self.assertGreaterEqual(len(collector.posts), 3)
+            self.assertEqual(len(set(collector.peers)), 1)
+            self.assertEqual(samples(collector.posts[-1][2])["zhtps_request_duration_seconds_count"], 1)
+
+    def test_unframed_response_body_deadline_preserves_service(self):
+        # Cancellation can fail at the transport layer without an HTTP body error.
+        with Collector(status=200, content_length=False, stalled_body=True) as collector:
+            with Running("--victoria-metrics", collector.url, "--no-access-log") as server:
+                wait_for(lambda: counters(server)["metrics_push_errors_total"] > 0)
+                for _ in range(10):
+                    request(server.port)
+                begin = time.monotonic()
+            self.assertLess(time.monotonic() - begin, 3.5)
+
     def test_custom_application_metrics_merge_workers(self):
         with Collector() as collector, patch.object(wire, "BINARY", APPLICATION):
             with Running("--victoria-metrics", collector.url, "--workers", "2",

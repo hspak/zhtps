@@ -50,13 +50,7 @@ pub fn post(
     var results: [2]Completion = undefined;
     var selection: std.Io.Select(Completion) = .init(client.io, &results);
     defer selection.cancelDiscard();
-    try selection.concurrent(.response, std.http.Client.fetch, .{ client, .{
-        .location = .{ .uri = uri },
-        .method = .POST,
-        .payload = payload,
-        .redirect_behavior = .unhandled,
-        .headers = .{ .content_type = .{ .override = content_type } },
-    } });
+    try selection.concurrent(.response, fetch, .{ client, uri, payload, content_type });
     try selection.concurrent(.deadline, std.Io.sleep, .{
         client.io,
         .fromSeconds(2),
@@ -69,4 +63,38 @@ pub fn post(
         },
         .deadline => false,
     };
+}
+
+// Zig 0.16 Client.fetch reads until EOF for a 204 without Content-Length and
+// then unwraps a missing body error on cancellation. Real VictoriaMetrics uses
+// this legal bodyless response. Normalize it before draining, and preserve a
+// transport ReadFailed even when the HTTP framing layer has no specific error.
+fn fetch(
+    client: *std.http.Client,
+    uri: std.Uri,
+    payload: []const u8,
+    content_type: []const u8,
+) std.http.Client.FetchError!std.http.Client.FetchResult {
+    var request = try client.request(.POST, uri, .{
+        .redirect_behavior = .unhandled,
+        .headers = .{ .content_type = .{ .override = content_type } },
+    });
+    defer request.deinit();
+    request.transfer_encoding = .{ .content_length = payload.len };
+    var body = try request.sendBodyUnflushed(&.{});
+    try body.writer.writeAll(payload);
+    try body.end();
+    try request.connection.?.flush();
+    var response = try request.receiveHead(&.{});
+    if (response.head.status == .no_content or
+        response.head.status == .not_modified or
+        response.head.status.class() == .informational)
+    {
+        response.head.transfer_encoding = .none;
+        response.head.content_length = 0;
+    }
+    _ = response.reader(&.{}).discardRemaining() catch {
+        return response.bodyErr() orelse error.ReadFailed;
+    };
+    return .{ .status = response.head.status };
 }

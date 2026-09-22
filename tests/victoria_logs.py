@@ -31,9 +31,11 @@ def wait_for(predicate, timeout=5):
 
 
 class Collector:
-    def __init__(self, status=204, stalled=False, tls=None):
+    def __init__(self, status=204, stalled=False, tls=None, content_length=True, stalled_body=False):
         self.status = status
         self.stalled = stalled
+        self.content_length = content_length
+        self.stalled_body = stalled_body
         self.posts = []
         self.peers = []
         self.release = threading.Event()
@@ -50,8 +52,13 @@ class Collector:
                     owner.release.wait(10)
                 try:
                     self.send_response(owner.status)
-                    self.send_header("Content-Length", "0")
+                    if owner.content_length:
+                        self.send_header("Content-Length", "0")
                     self.end_headers()
+                    if owner.stalled_body:
+                        self.wfile.flush()
+                        owner.release.wait(10)
+                        self.close_connection = True
                 except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
                     pass
 
