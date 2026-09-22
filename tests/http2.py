@@ -203,6 +203,18 @@ class Http2Tests(unittest.TestCase):
             self.assertIsNone(conditional["reset"])
             self.success(client.wait(client.request("/origin")))
 
+            records = []
+            deadline = time.monotonic() + 3
+            while len(records) < 4 and time.monotonic() < deadline:
+                records = [e for e in server.events if e["event"] == "request_complete"]
+                time.sleep(.01)
+            self.assertEqual(len(records), 4)
+            self.assertEqual([(e["method"], e["status"]) for e in records[:3]],
+                             [("GET", 200), ("HEAD", 200), ("GET", 304)])
+            self.assertEqual([e["route"] for e in records[:3]], ["/static"] * 3)
+            self.assertEqual([e.get("fields", {}).get("file_path") for e in records],
+                             ["docs/testing.md"] * 3 + [None])
+
     def test_response_field_encoding_preserves_duplicates_and_rejects_invalid_metadata(self):
         with self.server(fixture=True) as server, Client(server.port, self.context) as client:
             stream = client.request("/response-fields")

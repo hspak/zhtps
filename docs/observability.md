@@ -66,6 +66,11 @@ HTTP/1 and HTTP/2 responses, including batched responses and aborted HTTP/2 stre
 Behind a reverse proxy this is the proxy's IP; `Forwarded` and `X-Forwarded-For`
 headers do not override it.
 
+Built-in static file responses also include `fields.file_path`, the decoded file
+path relative to the serving directory. Directory indexes include their filename,
+such as `guide/index.html`; `route` continues to identify the configured mount.
+HEAD and conditional responses include the file path as well.
+
 Startup emits `resources_resolved` at info level with every resolved resource
 budget, including derived admission counts and burst, plus the sizing sources.
 `worker_resources_resolved` records each worker's selected CPU and actual io_uring

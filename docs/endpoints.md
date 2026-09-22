@@ -290,6 +290,13 @@ metadata, and Last-Modified when the timestamp is representable. Conditional
 requests can return 304 or 412. Range requests receive the full representation;
 automatic compression and SPA fallback are not provided.
 
+Static file responses add `fields.file_path` to access logs: the decoded path
+relative to the serving directory, including the selected index filename.
+For example, `/assets/guide/` logs `guide/index.html` for a mount at `/assets`.
+The `route` field retains the configured mount name. HEAD and conditional
+responses include the same file path; redirects and missing files omit it.
+This metadata uses the existing bounded access-field storage described below.
+
 URL escapes decode once for filenames (including spaces and UTF-8); encoded
 separators, backslashes, control bytes, `.` and `..` segments are rejected.
 The transport first normalizes URL dot segments, and all filesystem lookups stay

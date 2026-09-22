@@ -52,7 +52,7 @@ pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.
     var owned = true;
     defer if (owned) file.close(call.io);
     var stat = try file.stat(call.io);
-    var name: []const u8 = path;
+    var served_path: []const u8 = path;
     if (stat.kind == .directory) {
         const index = options.index_file orelse
             return call.text(.not_found, http.Response.errorBody(404));
@@ -63,7 +63,6 @@ pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.
         file.close(call.io);
         file = index_file;
         stat = try file.stat(call.io);
-        name = index;
         if (stat.kind != .file) return call.text(.not_found, http.Response.errorBody(404));
         if (!std.mem.endsWith(u8, call.request.path, "/")) {
             // An absolute-path reference with one leading slash cannot redirect to
@@ -75,6 +74,10 @@ pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.
             });
             return call.redirect(.permanent_redirect, location);
         }
+        served_path = if (path.len == 0) index else try std.fmt.allocPrint(gpa, "{s}/{s}", .{
+            std.mem.trimEnd(u8, path, "/"),
+            index,
+        });
     } else if (stat.kind != .file or std.mem.endsWith(u8, path, "/")) {
         return call.text(.not_found, http.Response.errorBody(404));
     }
@@ -86,7 +89,7 @@ pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.
         stat.mtime.nanoseconds,
         stat.ctime.nanoseconds,
     });
-    fields[0] = .{ .name = "Content-Type", .value = contentType(name) };
+    fields[0] = .{ .name = "Content-Type", .value = contentType(served_path) };
     fields[1] = .{ .name = "Cache-Control", .value = try gpa.dupe(u8, options.cache_control) };
     fields[2] = .{ .name = "ETag", .value = etag };
     fields[3] = .{ .name = "X-Content-Type-Options", .value = "nosniff" };
@@ -103,6 +106,7 @@ pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.
         .etag = etag,
         .last_modified = if (field_count == 5) modified else null,
     }, platform.realtimeNs(call.io) / std.time.ns_per_s) catch return error.InvalidInput;
+    call.access.put("file_path", served_path);
     if (status) |code| return .{
         .status = code,
         .headers = fields[0..field_count],

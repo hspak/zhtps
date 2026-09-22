@@ -288,7 +288,8 @@ pub fn Call(comptime Api: type) type {
         /// through this call. Defaults to the request path without its leading '/'.
         /// Files stream from an owned descriptor released automatically on completion
         /// or abort. Index pages are supported; symlinks are rejected and dotfiles
-        /// are hidden by default.
+        /// are hidden by default. Resolved files add directory-relative file_path
+        /// access metadata, including the index filename for directory requests.
         pub fn serveDir(
             call: *Self,
             directory: std.Io.Dir,

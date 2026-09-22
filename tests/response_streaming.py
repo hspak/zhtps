@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from urllib.parse import quote
 
 from wire import Client, Running
 
@@ -53,6 +54,16 @@ class StreamingTests(unittest.TestCase):
         data = client.take(size)
         self.assertEqual(client.take(2), b"\r\n")
         return data
+
+    def access_records(self, server, count):
+        deadline = time.monotonic() + 3
+        records = []
+        while len(records) < count and time.monotonic() < deadline:
+            records = [event for event in server.events
+                       if event.get("event") == "request_complete"]
+            time.sleep(.01)
+        self.assertEqual(len(records), count)
+        return records
 
     def test_flush_before_wait_neighbor_and_pipeline(self):
         for secure in (False, True):
@@ -106,6 +117,40 @@ class StreamingTests(unittest.TestCase):
                     self.assertEqual(client.response()[0], 304)
                     self.request(client, "/metadata")
                     self.assertEqual(client.response()[0], 200)
+
+                records = self.access_records(server, 4)
+                self.assertEqual([(e["method"], e["status"]) for e in records[:3]],
+                                 [("GET", 200), ("HEAD", 200), ("GET", 304)])
+                self.assertEqual([e["route"] for e in records[:3]], ["/static"] * 3)
+                self.assertEqual([e.get("fields", {}).get("file_path") for e in records],
+                                 ["docs/testing.md"] * 3 + [None])
+
+    def test_static_access_logs_resolve_indexes_and_decoded_filenames(self):
+        with tempfile.TemporaryDirectory(prefix="zhtps-static-", dir=".") as directory:
+            root = Path(directory)
+            (root / "guide").mkdir()
+            (root / "index.html").write_bytes(b"home")
+            (root / "guide/index.html").write_bytes(b"guide")
+            filename = 'hello "world"%20.txt'
+            (root / filename).write_bytes(b"file")
+            prefix = "/static/" + root.name
+            cases = [
+                (prefix + "/?version=1", 200, b"home", f"{root.name}/index.html"),
+                (prefix + "/guide/", 200, b"guide", f"{root.name}/guide/index.html"),
+                (prefix + "/" + quote(filename), 200, b"file", f"{root.name}/{filename}"),
+                (prefix + "/guide?version=1", 308, b"", None),
+                (prefix + "/missing", 404, b"404 Not Found: no resource matches this path.\n", None),
+            ]
+            for secure in (False, True):
+                with self.subTest(secure=secure), self.server(secure) as server:
+                    with self.client(server, secure) as client:
+                        for path, status, body, _ in cases:
+                            self.request(client, path)
+                            self.assertEqual(client.response()[::2], (status, body))
+                    records = self.access_records(server, len(cases))
+                    self.assertEqual([e["route"] for e in records], ["/static"] * len(cases))
+                    self.assertEqual([e.get("fields", {}).get("file_path") for e in records],
+                                     [file_path for _, _, _, file_path in cases])
 
     def test_head_bodyless_and_empty_skip_or_finish_production(self):
         for secure in (False, True):
