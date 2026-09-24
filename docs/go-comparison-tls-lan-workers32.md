@@ -10,7 +10,8 @@ The current worktree is measured; this is not a controlled TLS-on/off comparison
 against the older source revision.
 
 The server is `192.0.2.10`; the load generator is `client.example`
-(`192.0.2.20`), reached with the existing SSH configuration using `/path/to/benchmark-key`.
+(`192.0.2.20`), reached through SSH. These are example addresses and hostnames;
+use your own trusted SSH configuration.
 The audit verifies distinct host boot IDs and the exact remote load executable hash.
 ZHTPS uses 32 workers, each with 1,024 public connection slots and active-request
 permits (32,768 public slots total). Go runs without affinity restrictions and

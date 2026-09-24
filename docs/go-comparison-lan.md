@@ -161,9 +161,9 @@ headroom. These numbers characterize the complete measured LAN path.
 
 Build with `python3 -c 'import sys; sys.path.insert(0,"bench"); import compare; compare.build()'`
 and copy `zig-out/bench/load` to the client as `/tmp/zhtps-go-comparison-load-20260912`.
-The recorded runs used a dedicated SSH configuration with the existing
-`/path/to/benchmark-key` identity and `/path/to/known_hosts` trusted host file.
-Use an appropriate trusted configuration for your host.
+Use a dedicated SSH configuration with an appropriate identity and trusted host
+file for your client. The addresses, hostnames, and SSH paths below are examples;
+replace them with your own configuration.
 
 ```sh
 python3 bench/compare.py --server-address 192.0.2.10 \

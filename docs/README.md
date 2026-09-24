@@ -37,3 +37,8 @@
 
 Measurement reports retain their original dates and configurations; use the guides
 and current source for supported settings.
+
+Infrastructure identifiers in reports, run catalogs, and the browser report are
+anonymized. Hostnames, addresses, interfaces, boot identifiers, and SSH paths are
+examples or labels, not connection details. See the [retention and privacy
+policy](runs/README.md#infrastructure-privacy) before publishing new measurements.

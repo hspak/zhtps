@@ -17,8 +17,9 @@ Each entry contains:
 - `record`: the retained configuration, provenance, outcomes, or summary.
 - `original_sha256`: the hash of the original JSON artifact before compaction.
 - `omitted_fields`: names and occurrence counts of fields removed from that
-  artifact, including nested fields. An empty object means the JSON values were
-  retained completely, although whitespace and formatting may differ.
+  artifact, including nested fields. An empty object means no fields were omitted
+  during compaction; infrastructure identifiers are still anonymized as described
+  below, and whitespace and formatting may differ.
 
 The catalogs preserve top-level result and setup records, along with per-run
 `run`, `summary`, `manifest`, `build`, and `variants` records. Reported aggregates,
@@ -43,8 +44,28 @@ the original experiment and may require artifacts that are no longer present.
 
 The summaries cannot support a fresh audit of the deleted raw measurements or
 reconstruct every historical source variant. Recorded hashes identify those
-versions; they do not replace the deleted bytes. The cleanup changes the working
-tree and does not rewrite Git history.
+versions; they do not replace the deleted bytes. The earlier artifact compaction
+only changed the working tree. The subsequent infrastructure privacy cleanup
+also scrubs local Git history.
+
+## Infrastructure privacy
+
+Reports and catalogs retain measurements and relevant hardware, software, and
+tuning information. Local infrastructure identifiers are replaced throughout
+the documentation, including the browser report's compressed downloads:
+
+- `benchmark-server`, `benchmark-client`, and `client.example` identify roles.
+- `192.0.2.10` and `192.0.2.20` are example server and client addresses.
+- `server_eth0`, `client_eth0`, and `wireless0` are interface labels.
+- Boot labels preserve comparisons between runs without publishing boot UUIDs.
+- PCI addresses and network namespace identifiers are redacted.
+- Checkout paths are relative; SSH keys, configurations, and known-host files
+  use `/path/to/` placeholders. Supply your own trusted configuration.
+
+These labels are not usable connection settings. `original_sha256` still
+identifies the original artifact, before compaction and anonymization; it is not
+the checksum of the retained record. Browser download checksums identify the
+anonymized bytes actually embedded in that report.
 
 ## Adding a run
 
@@ -53,7 +74,7 @@ directory. Keep the maintained harnesses in `bench/`. For a result worth keeping
 commit a short report containing:
 
 - The question, date, source revision or hashes, and the candidate variants.
-- Commands, tool versions, hosts, CPU placement, workload, and duration.
+- Commands, tool versions, host roles, CPU placement, workload, and duration.
 - Repetitions, summarized results, failures, controls, and limitations.
 - The decision and its reason, including inconclusive or rejected outcomes.
 
@@ -61,6 +82,11 @@ Retain compact JSON or CSV summaries alongside the description. Do not commit
 raw traces, binaries, profiles, or copies of source trees. Raw-data auditors
 and summarizers in `bench/` require fresh run output; the browser report builds
 directly from retained catalogs with `python3 bench/render_reports.py`.
+
+Before committing, remove real hostnames, network addresses, usernames, home
+paths, SSH configuration details, machine identifiers, and credentials. Review
+JSON keys as well as values. Rebuild the browser report after sanitizing its
+inputs, and check its decoded attachments as well as its visible text.
 
 ## Catalogs
 

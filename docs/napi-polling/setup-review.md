@@ -54,7 +54,7 @@ Both controls report server NAPI ID 104 and client NAPI ID 8194. These are in
 the valid ranges for the inspected kernels: the server builds for 32 CPUs and
 the client for 8192, and NAPI IDs start above NR_CPUS. Both kernels enable
 CONFIG_NET_RX_BUSY_POLL. Nonzero alone would not have been a sufficient range
-check. The kernel configurations and boot IDs are preserved.
+check. The kernel configurations and anonymized boot labels are preserved.
 [Kernel configuration](../runs/napi-polling.json "Summary of docs/napi-polling/kernel-config.json; raw artifact retired"),
 [valid ID range](https://raw.githubusercontent.com/torvalds/linux/master/include/net/busy_poll.h).
 

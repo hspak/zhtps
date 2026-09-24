@@ -1,5 +1,10 @@
 # Benchmarks
 
+> Infrastructure identifiers in historical commands are examples. Replace
+> `client.example`, `192.0.2.10`, interface labels, and `/path/to/` SSH paths with
+> your own benchmark configuration. See the [documentation privacy
+> policy](../docs/runs/README.md#infrastructure-privacy) before publishing results.
+
 ## Access logs
 
 Use `zig build -Doptimize=ReleaseSafe install-access-log` to build the isolated

@@ -21,8 +21,8 @@ reviewed source; the follow-up records subsequent code changes and measurements.
 
 ## Which Bun implementation was reviewed
 
-The requested `../bun` directory is absent. The clean checkout at
-`../bun`, commit `ae7179126de54c4cd9496f784168671bb520e92a`, was reviewed.
+A clean Bun checkout at commit
+`ae7179126de54c4cd9496f784168671bb520e92a` was reviewed.
 The comparison binary reports `1.4.0+34cbb9a40`, corresponding to the earlier
 commit `34cbb9a40b4bd1bd767d134a7065e66c2432a676` dated August 19. ZHTPS source
 references below are snapshots of the current working tree, including the
