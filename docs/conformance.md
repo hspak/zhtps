@@ -33,7 +33,7 @@ custom applications retain the semantic responsibilities described below.
 | §7.1: chunk sizes, extensions, delimiters, trailers | Incremental hexadecimal parser with checked arithmetic, bounded extension lines, cumulative chunk framing and trailer storage; ignores unknown extensions. Fragmented chunked echo, grammar, overflow, trailer and pipelining tests. |
 | §7.1.2: trailers remain separate | `request.trailers` is separate from `request.headers`; routing/framing/authentication trailer names are rejected and never merged into the head. |
 | §8: incomplete messages | EOF before body completion returns 400 when a response is still possible; partial header/body deadlines return 408 and close. Half-close/truncated body wire tests. |
-| §§9.3–9.3.2: persistence and pipelining | Sequential responses, complete framing before reuse, Connection close dominance, HTTP/1.0 opt-in keep-alive. GET/HEAD/chunked/conditional pipelining tests. |
+| §§9.3–9.3.2: persistence and pipelining | Sequential responses; transport forces closure on final responses with unread request framing, including custom body callbacks. Bodyless heads and fully consumed requests remain reusable. Connection close dominance and HTTP/1.0 opt-in keep-alive. GET/HEAD/chunked/conditional pipelining and early-final wire regressions. |
 | §9.6: teardown | Half-close write, bounded read drain, then close. Pending kernel references survive cancellation until all related CQEs are collected. Churn, half-close, unread-log, slow-writer, active-shutdown, late-cancellation and fatal-error ownership tests. |
 
 ## Semantics

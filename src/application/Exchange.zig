@@ -71,9 +71,6 @@ pub fn receiveHead(exchange: *Exchange, request: *const http.Request) ?http.Resp
             .status = 304,
             .headers = exchange.fields[0..1],
             .body = .{ .stream = if (exchange.route == .root) root_body.len else stream_length },
-            // The head is already consumed. With no content, its boundary
-            // is also the request boundary and pipelined bytes stay intact.
-            .close = request.hasBody(),
         };
     }
     return null;

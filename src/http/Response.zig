@@ -9,6 +9,8 @@ const Response = @This();
 status: u16 = 200,
 headers: []const http.Header = &.{},
 body: Body = .{ .bytes = "" },
+/// Requests HTTP/1 connection closure. The server also forces closure when
+/// request framing is incomplete, even if this is false.
 close: bool = false,
 
 pub const Body = union(enum) {

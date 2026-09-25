@@ -2540,13 +2540,7 @@ pub fn Worker(comptime App: type) type {
                                 .reject => {
                                     self.metrics.recorder().add(.requests_rejected_total, 1);
                                     self.rejectionEvent(index, "admission_limit");
-                                    // Only a bodyless head is a complete request
-                                    // boundary. Unread bodies require closure.
-                                    try self.respondStatus(
-                                        index,
-                                        503,
-                                        request.chunked or (request.content_length orelse 0) > 0,
-                                    );
+                                    try self.respondStatus(index, 503, false);
                                     return;
                                 },
                                 .close => {
@@ -2596,10 +2590,7 @@ pub fn Worker(comptime App: type) type {
                             if (comptime !isolated_application and @hasDecl(App.Exchange, "flushLogs"))
                                 connection.exchange.flushLogs(&self.logger);
                             if (early_response) |response| {
-                                var early = response;
-                                early.close = early.close or request.chunked or
-                                    (request.content_length orelse 0) > 0;
-                                try self.startResponse(index, early);
+                                try self.startResponse(index, response);
                                 return;
                             }
                             if (comptime isolated_application) {
@@ -2614,19 +2605,12 @@ pub fn Worker(comptime App: type) type {
                                         connection.application_deadline_ns,
                                     );
                                     if (connection.exchange.runHead(request)) |response| {
-                                        var early = response;
-                                        early.close = early.close or request.chunked or
-                                            (request.content_length orelse 0) > 0;
-                                        try self.startResponse(index, early);
+                                        try self.startResponse(index, response);
                                         return;
                                     }
                                 } else {
                                     if (!self.submitApplication(index, .head)) {
-                                        try self.respondStatus(
-                                            index,
-                                            503,
-                                            request.chunked or (request.content_length orelse 0) > 0,
-                                        );
+                                        try self.respondStatus(index, 503, false);
                                     }
                                     return;
                                 }
@@ -2760,10 +2744,7 @@ pub fn Worker(comptime App: type) type {
                 }
                 switch (completion.task.stage) {
                     .head => if (completion.response) |response| {
-                        var early = response;
-                        const request = &connection.parser.request;
-                        early.close = early.close or request.chunked or (request.content_length orelse 0) > 0;
-                        try self.startResponse(index, early);
+                        try self.startResponse(index, response);
                     } else {
                         connection.phase = .reading;
                         connection.deadline = @min(
@@ -2850,8 +2831,6 @@ pub fn Worker(comptime App: type) type {
             try self.startResponse(index, .{
                 .status = 308,
                 .headers = &.{.{ .name = "Location", .value = writer.buffered() }},
-                // An early redirect never consumes an upload or sends 100 Continue.
-                .close = request.hasBody(),
             });
         }
 
@@ -2912,7 +2891,6 @@ pub fn Worker(comptime App: type) type {
                 try self.startResponse(index, .{
                     .status = 204,
                     .headers = &.{.{ .name = "Allow", .value = "GET, HEAD, OPTIONS" }},
-                    .close = request.chunked or (request.content_length orelse 0) > 0,
                 });
                 return true;
             }
@@ -2973,7 +2951,6 @@ pub fn Worker(comptime App: type) type {
                             .{ .name = "Cache-Control", .value = "no-store" },
                             .{ .name = "Content-Type", .value = "text/plain; charset=utf-8" },
                         },
-                    .close = request.chunked or (request.content_length orelse 0) > 0,
                 });
                 return true;
             }
@@ -3256,7 +3233,21 @@ pub fn Worker(comptime App: type) type {
                 try self.forceClose(index);
                 return;
             }
-            response.close = response.close or self.draining or self.shouldStop() or
+            // Ending needs no more input, including a bodyless head answered before
+            // its end event. Every other incomplete boundary requires closure.
+            const request_complete = switch (connection.parser.phase) {
+                .ending, .complete => true,
+                .head,
+                .fixed_body,
+                .chunk_size,
+                .chunk_body,
+                .chunk_cr,
+                .chunk_lf,
+                .trailers,
+                .invalid,
+                => false,
+            };
+            response.close = response.close or !request_complete or self.draining or self.shouldStop() or
                 connection.requests + 1 >= self.config.max_requests_per_connection;
             const second = platform.realtimeNs(self.io) / 1_000_000_000;
             if (second != self.date_second) {
@@ -4329,6 +4320,173 @@ test "embedded application receives normalized routing and preserved request oct
     );
     try testing.expectEqualStrings("[::1]", defaultAuthority(&authority_buffer, "::1", 443, 443));
     try testing.expectEqualStrings("[::1]:80", defaultAuthority(&authority_buffer, "::1", 80, 443));
+}
+
+test "early final responses close until request framing is fully consumed" {
+    const testing = std.testing;
+    const app = struct {
+        pub const isolated = true;
+        pub const Lane = enum { default };
+
+        pub fn laneOptions(_: Lane) struct { threads: usize, queue: usize, timeout_ms: u32 } {
+            return .{
+                .threads = 1,
+                .queue = 4,
+                .timeout_ms = 1000,
+            };
+        }
+
+        pub const Exchange = struct {
+            pub fn init(_: *Exchange, _: []u8) void {}
+
+            pub fn prepareHead(_: *Exchange, request: *const http.Request) ?http.Response {
+                return if (std.mem.eql(u8, request.path, "/head"))
+                    .{ .body = .{ .bytes = "early\n" } }
+                else
+                    null;
+            }
+
+            pub fn runHead(_: *Exchange, request: *const http.Request) ?http.Response {
+                return if (std.mem.eql(u8, request.path, "/run-head"))
+                    .{ .body = .{ .bytes = "early\n" } }
+                else
+                    null;
+            }
+
+            pub fn lane(_: *const Exchange) Lane {
+                return .default;
+            }
+
+            pub fn streamsBody(_: *const Exchange) bool {
+                return true;
+            }
+
+            pub fn runBody(_: *Exchange, request: *const http.Request, _: []const u8) ?http.Response {
+                // The transport must enforce closure even when a custom callback does not.
+                return if (std.mem.eql(u8, request.path, "/body"))
+                    .{ .body = .{ .bytes = "early\n" } }
+                else
+                    null;
+            }
+
+            pub fn receiveBody(_: *Exchange, _: []const u8) error{}!void {}
+
+            pub fn respond(_: *Exchange, _: *const http.Request) http.Response {
+                return .{ .body = .{ .bytes = "complete\n" } };
+            }
+
+            pub fn produce(_: *Exchange, _: []u8) ?[]const u8 {
+                return null;
+            }
+
+            pub fn allowedMethods(_: *const Exchange) []const u8 {
+                return "GET, POST";
+            }
+        };
+    };
+    const TestServer = Worker(app);
+    var workers: [1]TestServer = undefined;
+    var shared: TestServer.Shared = .{ .workers = &workers };
+    var stop: std.atomic.Value(bool) = .init(false);
+    workers[0].init(testing.allocator, testing.io, .{
+        .config = .{
+            .port = 0,
+            .admin_connections = 0,
+            .max_connections = 4,
+            .workers = 1,
+            .http2 = .{ .max_streams_per_worker = 4 },
+            .idle_timeout_ms = 100,
+            .log_fd = null,
+            .access_log = false,
+        },
+        .stop = &stop,
+        .worker_id = 0,
+        .shared = &shared,
+    }) catch |err| switch (err) {
+        error.IoUringUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer workers[0].deinit();
+    try workers[0].startApplications();
+    defer workers[0].stopApplications();
+    const thread = try std.Thread.spawn(.{}, TestServer.workerMain, .{&workers[0]});
+    defer {
+        stop.store(true, .monotonic);
+        thread.join();
+    }
+    const address = try std.Io.net.IpAddress.parse("127.0.0.1", workers[0].listener.port);
+    const cases = [_]struct { request: []const u8, close: bool }{
+        .{
+            .request = "POST /body HTTP/1.1\r\nHost: local\r\nContent-Length: 4096\r\n\r\nx",
+            .close = true,
+        },
+        .{
+            .request = "POST /body HTTP/1.1\r\nHost: local\r\n" ++
+                "Transfer-Encoding: chunked\r\n\r\n2\r\nx",
+            .close = true,
+        },
+        .{
+            .request = "POST /body HTTP/1.1\r\nHost: local\r\n" ++
+                "Transfer-Encoding: chunked\r\n\r\n1\r\nx\r\n",
+            .close = true,
+        },
+        .{
+            .request = "POST /body HTTP/1.1\r\nHost: local\r\n" ++
+                "Transfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\nDigest: valid\r\n\r\n",
+            .close = true,
+        },
+        .{
+            .request = "POST /head HTTP/1.1\r\nHost: local\r\n" ++
+                "Content-Length: 1\r\nExpect: 100-continue\r\n\r\nx",
+            .close = true,
+        },
+        .{
+            .request = "POST /run-head HTTP/1.1\r\nHost: local\r\n" ++
+                "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+            .close = true,
+        },
+        .{
+            .request = "GET /head HTTP/1.1\r\nHost: local\r\n\r\n",
+            .close = false,
+        },
+        .{
+            .request = "POST /run-head HTTP/1.1\r\nHost: local\r\nContent-Length: 0\r\n\r\n",
+            .close = false,
+        },
+        .{
+            .request = "POST /body HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\n\r\nx",
+            .close = false,
+        },
+        .{
+            .request = "POST /complete HTTP/1.1\r\nHost: local\r\n" ++
+                "Transfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\nDigest: valid\r\n\r\n",
+            .close = false,
+        },
+    };
+    for (cases) |case| {
+        const stream = try address.connect(testing.io, .{ .mode = .stream });
+        defer stream.close(testing.io);
+        var buffer: [1024]u8 = undefined;
+        var writer = stream.writer(testing.io, &buffer);
+        try writer.interface.writeAll(case.request);
+        try writer.interface.writeAll("GET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
+        try writer.interface.flush();
+        var reader = stream.reader(testing.io, &buffer);
+        const response = try reader.interface.allocRemaining(testing.allocator, .limited(4096));
+        defer testing.allocator.free(response);
+        const head_end = std.mem.indexOf(u8, response, "\r\n\r\n") orelse
+            return error.MissingHead;
+        try testing.expectEqual(case.close, std.mem.indexOf(
+            u8,
+            response[0..head_end],
+            "\r\nConnection: close",
+        ) != null);
+        try testing.expectEqual(
+            @as(usize, if (case.close) 1 else 2),
+            std.mem.count(u8, response, "HTTP/1.1 200 OK\r\n"),
+        );
+        try testing.expect(std.mem.endsWith(u8, response, if (case.close) "early\n" else "complete\n"));
+    }
 }
 
 test "fatal completion drains existing receives before returning" {
