@@ -281,6 +281,7 @@ pub fn Call(comptime Api: type) type {
         response_producer: *?Producer,
         response_file: *?static_files.Transfer,
         route_path: []const u8,
+        static_cache: ?*const static_files.Cache = null,
 
         pub const ServeDirOptions = static_files.Options;
 
@@ -532,6 +533,8 @@ pub fn Route(comptime Api: type) type {
         lane: Lane = std.enums.values(Lane)[0],
         /// Directory mounts match their prefix and every descendant path.
         subtree: bool = false,
+        /// Boot-time preparation for an opted-in static mount.
+        static_mount: ?static_files.Cache.Mount = null,
 
         fn matches(route: Self, path: []const u8) bool {
             if (!route.subtree) return routing.matches(path, route.path);
@@ -619,9 +622,11 @@ pub fn get(comptime path: []const u8, comptime handler: anytype) Route(HandlerAp
 
 /// Mounts a filesystem directory at a literal URL prefix, including under groups.
 /// Options require root (a path relative to cwd, or absolute); optional index_file,
-/// cache_control, dotfiles, name, before and lane configure serving and execution.
+/// cache_control, dotfiles, zstd, name, before and lane configure serving and execution.
 /// Explicit endpoints win over mounts; the longest matching mount wins otherwise.
 /// The root is opened on each request. File I/O runs on the selected application lane.
+/// zstd prepares compressible files during server initialization; later source changes
+/// fall back to identity until restart. Preparation errors fail initialization.
 pub fn staticFiles(
     comptime Api: type,
     comptime prefix: []const u8,
@@ -633,6 +638,7 @@ pub fn staticFiles(
         "index_file",
         "cache_control",
         "dotfiles",
+        "zstd",
         "name",
         "before",
         "lane",
@@ -649,12 +655,14 @@ pub fn staticFiles(
         .dotfiles = if (@hasField(@TypeOf(options), "dotfiles")) options.dotfiles else false,
     };
     comptime static_files.validateOptions(serving);
+    const zstd = if (@hasField(@TypeOf(options), "zstd")) options.zstd else false;
     const handler = struct {
         fn respond(call: *Call(Api)) Call(Api).HandlerError!http.Response {
             const directory = try std.Io.Dir.cwd().openDir(call.io, options.root, .{});
             defer directory.close(call.io);
             const rest = call.request.path[call.route_path.len..];
             var request_options = serving;
+            request_options.cache = if (zstd) call.static_cache else null;
             request_options.path = if (std.mem.startsWith(u8, rest, "/")) rest[1..] else rest;
             return call.serveDir(directory, request_options);
         }
@@ -665,6 +673,7 @@ pub fn staticFiles(
         .path = prefix,
         .handler = handler.respond,
         .subtree = true,
+        .static_mount = if (zstd) .{ .root = options.root, .dotfiles = serving.dotfiles } else null,
         .before = if (@hasField(@TypeOf(options), "before")) options.before else &.{},
         .lane = if (@hasField(@TypeOf(options), "lane"))
             options.lane
@@ -737,6 +746,41 @@ pub fn Application(comptime Api: type) type {
 
         pub const Services = if (@hasDecl(Api, "Services")) Api.Services else void;
         pub const RuntimeInit = if (Services == void) void else *Services;
+        pub const has_static_cache = has_cache: {
+            for (routes) |route| if (route.static_mount != null) break :has_cache true;
+            break :has_cache false;
+        };
+        pub const Prepared = if (has_static_cache) *static_files.Cache else void;
+        pub const Execution = if (has_static_cache) struct {
+            services: RuntimeInit,
+            cache: *const static_files.Cache,
+        } else RuntimeInit;
+
+        /// Prepares immutable static representations before any listeners are bound.
+        pub fn prepare(gpa: Allocator, io: std.Io) static_files.Cache.Error!Prepared {
+            if (comptime !has_static_cache) return;
+            const cache = try gpa.create(static_files.Cache);
+            errdefer gpa.destroy(cache);
+            cache.* = try .init(gpa, io);
+            errdefer cache.deinit(gpa, io);
+            for (routes) |route| if (route.static_mount) |mount| try cache.prepare(gpa, io, mount);
+            return cache;
+        }
+
+        /// Releases preparation after every worker and exchange has stopped.
+        pub fn unprepare(gpa: Allocator, io: std.Io, prepared: Prepared) void {
+            if (comptime has_static_cache) {
+                prepared.deinit(gpa, io);
+                gpa.destroy(prepared);
+            }
+        }
+
+        /// Combines borrowed application services with the server-owned cache.
+        pub fn execution(runtime: RuntimeInit, prepared: Prepared) Execution {
+            if (comptime has_static_cache) return .{ .services = runtime, .cache = prepared };
+            return runtime;
+        }
+
         pub const CustomMetrics = Call(Api).Metrics;
         pub const Lane = Route(Api).Lane;
         pub const isolated = true;
@@ -789,7 +833,7 @@ fn RoutedExchange(comptime Api: type) type {
         const C = Call(Api);
         const R = Route(Api);
         const Local = C.Local;
-        const RuntimeInit = if (C.Services == void) void else *C.Services;
+        const RuntimeInit = Application(Api).Execution;
 
         storage: []u8,
         used: usize = 0,
@@ -819,6 +863,7 @@ fn RoutedExchange(comptime Api: type) type {
         cancellation: ?*const std.atomic.Value(bool) = null,
         response_producer: ?C.Producer = null,
         response_file: ?static_files.Transfer = null,
+        static_cache: if (Application(Api).has_static_cache) *const static_files.Cache else void = undefined,
         response_stream: ResponseStream = .{},
 
         pub const BodyError = error{BodyTooLarge};
@@ -834,7 +879,8 @@ fn RoutedExchange(comptime Api: type) type {
         pub fn initApplication(exchange: *Self, storage: []u8, runtime: RuntimeInit) void {
             exchange.* = .{
                 .storage = storage,
-                .services = runtime,
+                .services = if (comptime Application(Api).has_static_cache) runtime.services else runtime,
+                .static_cache = if (comptime Application(Api).has_static_cache) runtime.cache else {},
             };
         }
 
@@ -1102,6 +1148,7 @@ fn RoutedExchange(comptime Api: type) type {
                 .cancellation = exchange.cancellation,
                 .response_producer = &exchange.response_producer,
                 .response_file = &exchange.response_file,
+                .static_cache = if (comptime Application(Api).has_static_cache) exchange.static_cache else null,
                 .route_path = if (exchange.selected) |route| route.path else "",
             };
         }

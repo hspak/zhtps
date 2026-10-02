@@ -126,7 +126,7 @@ pub fn Worker(comptime App: type) type {
     return struct {
         const Self = @This();
 
-        pub const RuntimeInit = if (@hasDecl(App, "RuntimeInit")) App.RuntimeInit else void;
+        pub const RuntimeInit = if (@hasDecl(App, "Execution")) App.Execution else if (@hasDecl(App, "RuntimeInit")) App.RuntimeInit else void;
         const has_application_metrics = @hasDecl(App, "CustomMetrics");
         const ApplicationMetrics = if (has_application_metrics) App.CustomMetrics else void;
         const isolated_application = if (@hasDecl(App, "isolated")) App.isolated else false;

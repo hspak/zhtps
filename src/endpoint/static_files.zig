@@ -2,7 +2,12 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const linux = std.os.linux;
+const file_path = @import("static_files/path.zig");
+const validSegment = file_path.validSegment;
+const openPath = file_path.openPath;
+const openFile = file_path.openFile;
+pub const Cache = @import("static_files/Cache.zig");
+const encoding = @import("static_files/encoding.zig");
 const http = @import("../http.zig");
 const platform = @import("../platform.zig");
 const ResponseStream = @import("ResponseStream.zig");
@@ -15,9 +20,11 @@ pub const Options = struct {
     cache_control: []const u8 = "no-cache",
     /// Allows dot-prefixed names, but never '.' or '..'.
     dotfiles: bool = false,
+    /// Borrows a prepared cache through response selection. Null disables negotiation.
+    cache: ?*const Cache = null,
 };
 
-pub const Error = Allocator.Error || std.Io.Dir.OpenError || std.Io.File.OpenError ||
+pub const Error = Cache.Error || Allocator.Error || std.Io.Dir.OpenError || std.Io.File.OpenError ||
     std.Io.File.StatError || std.Io.File.ReadPositionalError || error{
     InvalidInput,
     FileChanged,
@@ -82,8 +89,27 @@ pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.
         return call.text(.not_found, http.Response.errorBody(404));
     }
 
-    const fields = try gpa.alloc(http.Header, 5);
-    const etag = try std.fmt.allocPrint(gpa, "W/\"{x}-{x}-{x}-{x}\"", .{
+    var length = stat.size;
+    var compressed = false;
+    if (options.cache) |cache| {
+        const preferences = try encoding.parse(call.request.headers);
+        if (preferences.zstd > 0 and preferences.zstd >= preferences.identity) {
+            if (try cache.select(call.io, file, stat)) |selected| {
+                file.close(call.io);
+                file = selected.file;
+                length = selected.length;
+                compressed = true;
+            }
+        }
+        if (!compressed and preferences.identity == 0) return .{
+            .status = 406,
+            .headers = &.{.{ .name = "Vary", .value = "Accept-Encoding" }},
+            .body = .{ .bytes = "406 Not Acceptable\n" },
+        };
+    }
+    const fields = try gpa.alloc(http.Header, 7);
+    const etag = try std.fmt.allocPrint(gpa, "W/\"{s}{x}-{x}-{x}-{x}\"", .{
+        if (compressed) "zstd-" else "",
         stat.inode,
         stat.size,
         stat.mtime.nanoseconds,
@@ -99,21 +125,29 @@ pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.
     if (modified >= 0 and modified < 253402300800) {
         const date = try gpa.create([29]u8);
         http.Response.formatDate(@intCast(modified), date);
-        fields[4] = .{ .name = "Last-Modified", .value = date };
+        fields[field_count] = .{ .name = "Last-Modified", .value = date };
+        field_count += 1;
+    }
+    if (options.cache != null) {
+        fields[field_count] = .{ .name = "Vary", .value = "Accept-Encoding" };
+        field_count += 1;
+    }
+    if (compressed) {
+        fields[field_count] = .{ .name = "Content-Encoding", .value = "zstd" };
         field_count += 1;
     }
     const status = http.conditions.evaluate(call.request, .{
         .etag = etag,
-        .last_modified = if (field_count == 5) modified else null,
+        .last_modified = if (modified >= 0 and modified < 253402300800) modified else null,
     }, platform.realtimeNs(call.io) / std.time.ns_per_s) catch return error.InvalidInput;
     call.access.put("file_path", served_path);
     if (status) |code| return .{
         .status = code,
-        .headers = fields[0..field_count],
-        .body = if (code == 304) .{ .stream = stat.size } else .{ .bytes = "" },
+        .headers = fields[0 .. field_count - @as(usize, if (compressed and code != 304) 1 else 0)],
+        .body = if (code == 304) .{ .stream = length } else .{ .bytes = "" },
     };
     if (call.response_file.*) |previous| previous.file.close(call.io);
-    call.response_file.* = .{ .file = file, .length = stat.size };
+    call.response_file.* = .{ .file = file, .length = length };
     owned = false;
     const C = @TypeOf(call.*);
     const producer = struct {
@@ -137,7 +171,7 @@ pub fn serve(call: anytype, directory: std.Io.Dir, options: Options) Error!http.
     };
     return call.stream(.{
         .headers = fields[0..field_count],
-        .length = stat.size,
+        .length = length,
     }, producer.run);
 }
 
@@ -183,59 +217,6 @@ fn decodePath(gpa: Allocator, encoded: []const u8, dotfiles: bool) (Allocator.Er
         if (!validSegment(segment, dotfiles)) return error.InvalidInput;
     }
     return path;
-}
-
-fn validSegment(segment: []const u8, dotfiles: bool) bool {
-    if (segment.len == 0 or std.mem.eql(u8, segment, ".") or
-        std.mem.eql(u8, segment, "..")) return false;
-    if (!dotfiles and segment[0] == '.') return false;
-    for (segment) |byte| {
-        if (byte < 0x20 or byte == 0x7f or byte == '\\') return false;
-    }
-    return true;
-}
-
-fn openPath(io: std.Io, root: std.Io.Dir, path: []const u8) Error!std.Io.File {
-    var directory = root;
-    var owned = false;
-    defer if (owned) directory.close(io);
-    var segments = std.mem.tokenizeScalar(u8, path, '/');
-    var segment = segments.next() orelse return openFile(root, ".");
-    while (segments.next()) |next| {
-        // Each lookup contains one component: NOFOLLOW also protects ancestors.
-        const child = try directory.openDir(io, segment, .{ .follow_symlinks = false });
-        if (owned) directory.close(io);
-        directory = child;
-        owned = true;
-        segment = next;
-    }
-    return openFile(directory, segment);
-}
-
-fn openFile(directory: std.Io.Dir, name: []const u8) Error!std.Io.File {
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    if (name.len >= buffer.len) return error.NameTooLong;
-    @memcpy(buffer[0..name.len], name);
-    buffer[name.len] = 0;
-    while (true) {
-        // NONBLOCK prevents a FIFO from occupying a lane indefinitely before stat
-        // rejects it; NOCTTY prevents device nodes from acquiring a controlling tty.
-        const result = linux.openat(directory.handle, buffer[0..name.len :0], .{
-            .CLOEXEC = true,
-            .NOFOLLOW = true,
-            .NONBLOCK = true,
-            .NOCTTY = true,
-        }, 0);
-        switch (linux.errno(result)) {
-            .SUCCESS => return .{ .handle = @intCast(result), .flags = .{ .nonblocking = true } },
-            .INTR => continue,
-            .NOENT, .NOTDIR, .LOOP, .NXIO, .NODEV => return error.FileNotFound,
-            .ACCES, .PERM => return error.AccessDenied,
-            .NAMETOOLONG => return error.NameTooLong,
-            .MFILE, .NFILE, .NOMEM => return error.SystemResources,
-            else => return error.Unexpected,
-        }
-    }
 }
 
 fn contentType(path: []const u8) []const u8 {
@@ -290,4 +271,8 @@ test "invalid static paths release decoding storage" {
     }) |path| {
         try testing.expectError(error.InvalidInput, decodePath(testing.allocator, path, false));
     }
+}
+
+test {
+    _ = Cache;
 }

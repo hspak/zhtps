@@ -269,6 +269,7 @@ file within it produces 404.
 | `index_file` | `"index.html"` | Single filename to serve for directories; `null` disables indexes |
 | `cache_control` | `"no-cache"` | Cache-Control response field; permits storage with revalidation |
 | `dotfiles` | `false` | Allow names starting with `.`, including `.well-known` |
+| `zstd` | `false` | Generate compressed representations during server initialization |
 | `name` | URL prefix | Route name used in logs and metrics |
 | `before` | Empty | Middleware, after inherited group middleware |
 | `lane` | First declared lane | Application lane for opening and streaming files |
@@ -288,7 +289,7 @@ Content-Type, with `application/octet-stream` for unknown extensions. Every file
 response includes `X-Content-Type-Options: nosniff`, a weak ETag derived from file
 metadata, and Last-Modified when the timestamp is representable. Conditional
 requests can return 304 or 412. Range requests receive the full representation;
-automatic compression and SPA fallback are not provided.
+SPA fallback is not provided. Compression is opt-in as described below.
 
 Static file responses add `fields.file_path` to access logs: the decoded path
 relative to the serving directory, including the selected index filename.
@@ -330,6 +331,43 @@ are `path`, `index_file`, `cache_control` and `dotfiles`; `path` is URL-escaped 
 relative to the directory, defaulting to the request path without leading slashes.
 Register this handler as a GET endpoint. Response file descriptors belong to the
 exchange and remain valid after the borrowed directory is closed.
+
+### Boot-time zstd compression
+
+```zig
+zhtps.staticFiles(Api, "/assets", .{ .root = "public", .zstd = true })
+```
+
+Server initialization walks opted-in mounts before binding listeners. It compresses
+HTML, CSS, JavaScript, JSON, source maps, web manifests, text/Markdown, XML, SVG and
+Wasm files of at least 1024 bytes, retaining only results smaller than the source.
+Symlinks and special files are skipped and the mount's dotfile policy applies.
+Preparation is sequential, with bounded buffers, zstd level 3, checksums and an
+8 MiB maximum window. Directory nesting is limited to 128 levels. Preparation
+errors fail startup and release partial results.
+
+Generated files live in a private `/tmp/zhtps-zstd-*` directory, outside the document
+root; source directories can be read-only. Each boot rebuilds the cache, which is
+removed when the server is deinitialized. Forced termination can leave a temporary
+directory behind. Startup cost grows with source bytes read/compressed; disk usage
+is the sum of retained compressed files and transient output. The in-memory index
+grows with the number of compressed files. No compression runs on request threads.
+
+GET and HEAD negotiate `Accept-Encoding`, including quality weights, wildcards and
+repeated fields. Absent/empty fields choose identity; zstd wins equal weights.
+Malformed weights or conflicting duplicate preferences produce 400. When neither
+available representation is acceptable, the response is 406. Negotiated responses
+include `Vary: Accept-Encoding`; compressed responses retain the original media
+type, use a distinct weak ETag and advertise the compressed Content-Length.
+Conditional requests select the representation before checking validators.
+
+The original file must still exist and pass normal access/path checks. Source
+device, inode, size, modification time and change time identify prepared entries.
+New or changed files use identity until restart, or 406 when identity is forbidden.
+Continue deploying changes by atomic rename; in-place writes during an active
+response have the same limitations as uncompressed serving. Dynamic `serveDir`
+calls are not discovered at startup; its optional `cache` borrows an explicitly
+prepared cache for callers managing their own lifecycle.
 
 ## Streaming responses
 

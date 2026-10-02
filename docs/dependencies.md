@@ -106,3 +106,17 @@ To update the bundled dependency:
 Security fixes to bundled libnghttp2 require rebuilding and redeploying each
 consuming executable or shared library. Applications embedding zhtps must include
 the [nghttp2 license](../licenses/nghttp2.txt) in their distribution.
+
+## libzstd
+
+Static compression uses the pinned [zstd 1.5.7 release](https://github.com/facebook/zstd/releases/tag/v1.5.7).
+`build/zstd.zig` compiles the common and compression C sources with Zig, using PIC
+and a single-threaded encoder. `-Dsystem-zstd=true` links the installed library
+instead. The library is distributed under the BSD license in `licenses/zstd.txt`;
+bundled builds install that notice alongside the existing dependency licenses.
+
+To update it, fetch the release archive with `zig fetch`, update its URL/hash in
+`build.zig.zon`, compare the source list with upstream `lib/compress` and `lib/common`,
+and refresh the license. Run `zig build test test-library test-static-zstd` with
+bundled and system zstd (the static suite requires zstd, OpenSSL and the HTTP/2
+Python environment). Rebuild and redeploy consumers to ship dependency fixes.

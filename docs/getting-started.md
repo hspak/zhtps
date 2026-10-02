@@ -20,7 +20,7 @@ regression evidence, and the remaining deployment and application responsibiliti
 
 Run shell commands from the repository root unless another directory is specified.
 
-Zig fetches pinned OpenSSL 3.5.8 LTS and nghttp2 1.70.0 releases, verifies their
+Zig fetches pinned OpenSSL 3.5.8 LTS and nghttp2 1.70.0 and zstd 1.5.7 releases, verifies their
 package hashes, and compiles them as static libraries. Normal builds need no
 system OpenSSL/nghttp2 development packages, Perl, Make, CMake, or Autotools.
 The initial build needs network access unless the dependencies are already cached.
@@ -31,6 +31,8 @@ The dependencies can independently use system installations:
   (`libssl-dev` on Debian/Ubuntu, `openssl-devel` on Fedora).
 - `-Dsystem-nghttp2=true`: requires nghttp2 development headers and libraries
   (`libnghttp2-dev` or `libnghttp2-devel`; tested with 1.70.0).
+
+`-Dsystem-zstd=true` similarly uses installed libzstd headers and libraries.
 
 Each system option skips fetching its bundled source. All modes link libc. The
 default target is Linux x86-64-v4 with glibc; cross builds need matching headers

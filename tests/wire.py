@@ -18,7 +18,7 @@ BINARY = sys.argv.pop(1) if len(sys.argv) > 1 else "zig-out/bin/zhtps"
 
 
 class Running:
-    def __init__(self, *options, nofile=None, close_logs=False, automatic=False, affinity=None):
+    def __init__(self, *options, nofile=None, close_logs=False, automatic=False, affinity=None, cwd=None):
         def limits():
             if nofile is not None:
                 resource.setrlimit(resource.RLIMIT_NOFILE, (nofile, nofile))
@@ -35,6 +35,7 @@ class Running:
             [BINARY, "--port", "0", "--admin-port", "0", *defaults, *options],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            cwd=cwd,
             preexec_fn=limits if nofile is not None or affinity is not None else None,
         )
         self.events = []

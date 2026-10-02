@@ -27,7 +27,7 @@ OpenSSL 3.5 LTS and libnghttp2 sources with Zig by default.
   evaluate entity-tag and modification-date preconditions with the public helper.
 - **Routing:** Normalized paths, named parameters, nested route groups, middleware,
   query/header access, and typed JSON request parsing.
-- **Static sites:** Directory mounts with index pages, content types, streaming,
+- **Static sites:** Directory mounts with opt-in boot-time zstd, index pages, content types, streaming,
   HEAD and cache revalidation. See [static files](docs/endpoints.md#static-files).
 - **Response helpers:** Text, JSON, redirects, custom headers/statuses, and automatic
   Date and framing headers.
@@ -43,8 +43,8 @@ OpenSSL 3.5 LTS and libnghttp2 sources with Zig by default.
 See [HTTP semantics and scope](docs/conformance.md), [HTTP/2](docs/http2.md),
 [TLS](docs/tls.md), and the [endpoint API](docs/endpoints.md) for contracts and limits.
 There is no h2c, HTTP/3, WebSocket/Upgrade, CONNECT tunnel, server push, automatic
-compression, or range serving; TLS uses one certificate chain without SNI-based
-selection or client-certificate authentication.
+response compression outside opted-in static mounts, or range serving; TLS uses
+one certificate chain without SNI-based selection or client-certificate authentication.
 
 ## Security
 

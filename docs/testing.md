@@ -16,6 +16,7 @@ zig build test-tls
 zig build test-victoria-logs
 zig build test-victoria-metrics
 zig build test-application test-upload test-response-streaming
+zig build test-static-zstd -Dhttp2-python=/tmp/zhtps-h2-tests/bin/python
 zig build test -Dtest-filter='fuzz framing' -Derror-tracing=false --fuzz=100K
 python3 tests/load.py --port 8080 --rate 1000 --duration 10 --connections 32
 python3 tests/sweep.py zig-out/bin/zhtps --output docs/load-sweep.json
@@ -25,6 +26,10 @@ The load/sweep and HTTP/1 wire tools require Python 3.11 or later and use only i
 standard library. TLS tests also invoke OpenSSL; the HTTP/2 suite requires the
 packages in `tests/requirements-http2.txt`. See [HTTP/2 verification](http2.md#verification)
 for environment setup and the `zig build test-http2` command.
+
+Static zstd tests use the same HTTP/2 environment and the `zstd` command to
+independently decode responses. They exercise preparation, negotiation, cache
+validators, source changes, filesystem boundaries and plaintext/TLS/HTTP/2 serving.
 
 The VictoriaLogs suite uses a local HTTP collector and OpenSSL-generated test
 credentials. It checks batching, timestamp and stream-field mapping, escaping,

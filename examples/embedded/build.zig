@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) void {
         .@"build-server" = false,
         .@"system-openssl" = system_openssl,
         .@"system-nghttp2" = system_nghttp2,
+        .@"system-zstd" = b.option(bool, "system-zstd", "Link system libzstd") orelse false,
     }).module("zhtps");
     const main = b.createModule(.{
         .root_source_file = b.path("main.zig"),

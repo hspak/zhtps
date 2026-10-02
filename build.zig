@@ -3,6 +3,7 @@
 const std = @import("std");
 const nghttp2 = @import("build/nghttp2.zig");
 const openssl = @import("build/openssl.zig");
+const zstd = @import("build/zstd.zig");
 
 const DeclarationOptions = struct {
     module: *std.Build.Module,
@@ -51,6 +52,7 @@ pub fn build(b: *std.Build) !void {
         "system-nghttp2",
         "Link system libnghttp2 instead of building the pinned source release",
     ) orelse false;
+    const system_zstd = b.option(bool, "system-zstd", "Link system libzstd instead of the pinned sources") orelse false;
     const error_tracing = b.option(
         bool,
         "error-tracing",
@@ -86,11 +88,16 @@ pub fn build(b: *std.Build) !void {
         mod.addCMacro("NGHTTP2_STATICLIB", "1");
     }
     mod.link_libc = true;
+    if (system_zstd) {
+        mod.linkSystemLibrary("zstd", .{});
+    } else if (zstd.addLibrary(b, .{ .target = target, .optimize = optimize })) |library| {
+        mod.linkLibrary(library);
+    }
     mod.addIncludePath(b.path("src"));
     // An explicit Linux target disables Zig's implicit native search paths.
     // Reuse host libraries only when the architecture, OS and ABI match.
     const host = b.graph.host.result;
-    if ((system_openssl or system_nghttp2) and b.sysroot == null and
+    if ((system_openssl or system_nghttp2 or system_zstd) and b.sysroot == null and
         target.result.cpu.arch == host.cpu.arch and
         target.result.os.tag == host.os.tag and target.result.abi == host.abi and
         (target.result.abi != .gnu or target.result.os.version_range.linux.glibc.order(
@@ -120,6 +127,8 @@ pub fn build(b: *std.Build) !void {
             b.installFile("licenses/openssl.txt", "share/licenses/zhtps/openssl.txt");
         if (!system_nghttp2)
             b.installFile("licenses/nghttp2.txt", "share/licenses/zhtps/nghttp2.txt");
+        if (!system_zstd)
+            b.installFile("licenses/zstd.txt", "share/licenses/zhtps/zstd.txt");
     }
     const run = b.addRunArtifact(exe);
     if (b.args) |args| run.addArgs(args);
@@ -231,6 +240,7 @@ pub fn build(b: *std.Build) !void {
     consumer.addArg(b.fmt("-Doptimize={s}", .{@tagName(optimize)}));
     consumer.addArg(b.fmt("-Dsystem-openssl={}", .{system_openssl}));
     consumer.addArg(b.fmt("-Dsystem-nghttp2={}", .{system_nghttp2}));
+    consumer.addArg(b.fmt("-Dsystem-zstd={}", .{system_zstd}));
     const consumer_target = target.query.zigTriple(b.allocator) catch @panic("OOM");
     const consumer_cpu = target.query.serializeCpuAlloc(b.allocator) catch @panic("OOM");
     consumer.addArg(b.fmt("-Dtarget={s}", .{consumer_target}));
@@ -280,12 +290,24 @@ pub fn build(b: *std.Build) !void {
         "Check generated response streaming over HTTP/1 and TLS",
     ).dependOn(&streaming_wire.step);
     b.step("test-tls", "Check TLS policy, encrypted HTTP and connection lifetimes").dependOn(&tls_wire.step);
+    const static_application = b.addExecutable(.{
+        .name = "static-zstd",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/static_zstd.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zhtps", .module = mod }},
+        }),
+    });
+    const http2_python = b.option([]const u8, "http2-python", "Python interpreter with the h2 test dependency") orelse "python3";
+    const static_wire = b.addSystemCommand(&.{
+        http2_python,
+        "tests/static_zstd.py",
+    });
+    static_wire.addArtifactArg(static_application);
+    b.step("test-static-zstd", "Check boot-time static compression over HTTP/1 and HTTP/2").dependOn(&static_wire.step);
     const http2_wire = b.addSystemCommand(&.{
-        b.option(
-            []const u8,
-            "http2-python",
-            "Python interpreter with the h2 test dependency",
-        ) orelse "python3",
+        http2_python,
         "tests/http2.py",
     });
     http2_wire.addArtifactArg(exe);

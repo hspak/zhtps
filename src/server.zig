@@ -9,8 +9,9 @@ const VictoriaLogs = Logger.VictoriaLogs;
 const platform = @import("platform.zig");
 const builtin_application = @import("application.zig");
 const worker = @import("server/worker.zig");
+const StaticCache = @import("endpoint/static_files/Cache.zig");
 
-pub const InitError = worker.RunError || VictoriaMetrics.InitError ||
+pub const InitError = StaticCache.Error || worker.RunError || VictoriaMetrics.InitError ||
     VictoriaLogs.InitError || VictoriaLogs.IdentityError;
 pub const RunError = InitError || std.Thread.SpawnError || VictoriaLogs.StartError ||
     VictoriaMetrics.StartError || error{AlreadyServed};
@@ -19,13 +20,18 @@ pub const RunError = InitError || std.Thread.SpawnError || VictoriaLogs.StartErr
 /// Direct hooks must be bounded and nonblocking; generated endpoint applications
 /// instead use shared bounded executors. Hooks for different connections may run
 /// concurrently even when they share a connection or transport owner.
-/// The server owns connection and stream storage, but no application-global resources.
+/// The server owns connection/stream storage and optional prepared application resources;
+/// application services remain caller-owned.
 pub fn Server(comptime App: type) type {
     return struct {
         const Self = @This();
         const Worker = worker.Worker(App);
+        const RuntimeInit = if (@hasDecl(App, "RuntimeInit")) App.RuntimeInit else void;
+        const Prepared = if (@hasDecl(App, "Prepared")) App.Prepared else void;
 
         gpa: std.mem.Allocator,
+        io: std.Io,
+        prepared: Prepared,
         shared: *Worker.Shared,
         threads: []std.Thread,
         automatic_mapping: []u8,
@@ -51,7 +57,7 @@ pub fn Server(comptime App: type) type {
             io: std.Io,
             config: Config,
         ) InitError!void {
-            if (comptime Worker.RuntimeInit != void)
+            if (comptime RuntimeInit != void)
                 @compileError("this application requires initApplication with its runtime value");
             return self.initInner(gpa, io, config, {});
         }
@@ -69,7 +75,7 @@ pub fn Server(comptime App: type) type {
             gpa: std.mem.Allocator,
             io: std.Io,
             config: Config,
-            application: Worker.RuntimeInit,
+            application: RuntimeInit,
         ) InitError!void {
             return self.initInner(gpa, io, config, application);
         }
@@ -79,10 +85,13 @@ pub fn Server(comptime App: type) type {
             gpa: std.mem.Allocator,
             io: std.Io,
             config: Config,
-            application: Worker.RuntimeInit,
+            application: RuntimeInit,
         ) InitError!void {
             self.* = undefined;
             try config.validate();
+            const prepared = if (comptime @hasDecl(App, "prepare")) try App.prepare(gpa, io) else {};
+            errdefer if (comptime @hasDecl(App, "unprepare")) App.unprepare(gpa, io, prepared);
+            const execution = if (comptime @hasDecl(App, "execution")) App.execution(application, prepared) else application;
             var detected = try Config.Resources.detect(gpa, io);
             if (config.worker_cpus.len == 0) try detected.detectPlacement(io, config.address);
             const automatic_mapping = try gpa.alloc(u8, 1280);
@@ -128,7 +137,7 @@ pub fn Server(comptime App: type) type {
                         .worker_id = @intCast(id),
                         .shared = shared,
                     },
-                    application,
+                    execution,
                 );
                 initialized += 1;
                 if (id == 0) {
@@ -153,6 +162,8 @@ pub fn Server(comptime App: type) type {
             } else null;
             self.* = .{
                 .gpa = gpa,
+                .io = io,
+                .prepared = prepared,
                 .shared = shared,
                 .threads = threads,
                 .automatic_mapping = automatic_mapping,
@@ -260,6 +271,7 @@ pub fn Server(comptime App: type) type {
             self.gpa.free(self.shared.workers);
             self.gpa.destroy(self.shared);
             self.gpa.free(self.automatic_mapping);
+            if (comptime @hasDecl(App, "unprepare")) App.unprepare(self.gpa, self.io, self.prepared);
             self.* = undefined;
         }
 

@@ -4,6 +4,11 @@
     .fingerprint = 0x3e194963961876da, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
+        .zstd = .{
+            .url = "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
+            .hash = "N-V-__8AAPZ7fwBg4JoCzM_0o2A8wxH2hsUUeiU1iuZv53L5",
+            .lazy = true,
+        },
         .openssl = .{
             .url = "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
             .hash = "N-V-__8AACtTzQdxH8BFuis5I9a2OIm66zKtSzb0giDbv_PU",
