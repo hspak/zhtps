@@ -346,8 +346,9 @@ Preparation is sequential, with bounded buffers, zstd level 3, checksums and an
 8 MiB maximum window. Directory nesting is limited to 128 levels. Preparation
 errors fail startup and release partial results.
 
-Generated files live in a private `/tmp/zhtps-zstd-*` directory, outside the document
-root; source directories can be read-only. Each boot rebuilds the cache, which is
+Generated files live in a private `/tmp/zhtps-zstd-*` directory; source directories
+can be read-only. Startup rejects any declared static root containing that directory,
+including mounts with compression disabled. Each boot rebuilds the cache, which is
 removed when the server is deinitialized. Forced termination can leave a temporary
 directory behind. Startup cost grows with source bytes read/compressed; disk usage
 is the sum of retained compressed files and transient output. The in-memory index

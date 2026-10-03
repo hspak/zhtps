@@ -27,7 +27,10 @@ pub const Selected = struct {
     length: u64,
 };
 
-pub const Error = Allocator.Error || path.Error || zstd.Error ||
+pub const RootError = std.Io.Dir.OpenError || std.Io.Dir.RealPathError ||
+    error{CacheInsideDocumentRoot};
+
+pub const Error = Allocator.Error || path.Error || zstd.Error || RootError ||
     std.Io.File.StatError || std.Io.Dir.Reader.Error || std.Io.Dir.CreateDirError ||
     std.Io.Dir.CreateFileAtomicError || std.Io.File.Atomic.ReplaceError ||
     error{ StaticTreeTooDeep, MetadataUnavailable };
@@ -58,7 +61,28 @@ pub fn deinit(cache: *Cache, gpa: Allocator, io: std.Io) void {
 pub fn prepare(cache: *Cache, gpa: Allocator, io: std.Io, mount: Mount) Error!void {
     const root = try std.Io.Dir.cwd().openDir(io, mount.root, .{ .iterate = true });
     defer root.close(io);
+    try cache.checkRoot(io, root);
     try cache.walk(gpa, io, root, mount.dotfiles, 0);
+}
+
+/// Rejects document roots containing the private cache, including symlink aliases.
+/// Call for every static mount, even those serving only uncompressed files.
+pub fn validateRoot(cache: *const Cache, io: std.Io, root_path: []const u8) RootError!void {
+    const root = try std.Io.Dir.cwd().openDir(io, root_path, .{});
+    defer root.close(io);
+    try cache.checkRoot(io, root);
+}
+
+fn checkRoot(cache: *const Cache, io: std.Io, root: std.Io.Dir) RootError!void {
+    var root_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const root_length = try root.realPath(io, &root_buffer);
+    const root_path = root_buffer[0..root_length];
+    var cache_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const cache_length = try cache.directory.realPath(io, &cache_buffer);
+    const cache_path = cache_buffer[0..cache_length];
+    if (std.mem.startsWith(u8, cache_path, root_path) and
+        (root_path.len == 1 or cache_path.len == root_path.len or
+            cache_path[root_path.len] == '/')) return error.CacheInsideDocumentRoot;
 }
 
 fn walk(cache: *Cache, gpa: Allocator, io: std.Io, directory: std.Io.Dir, dotfiles: bool, depth: usize) Error!void {
@@ -208,4 +232,15 @@ test "static cache cleanup removes generated files" {
     defer testing.allocator.free(name);
     cache.deinit(testing.allocator, testing.io);
     try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(testing.io, name, .{}));
+}
+
+test "static cache rejects a document root containing its generated files" {
+    const testing = std.testing;
+    var cache = try Cache.init(testing.allocator, testing.io);
+    defer cache.deinit(testing.allocator, testing.io);
+    try testing.expectError(error.CacheInsideDocumentRoot, cache.prepare(
+        testing.allocator,
+        testing.io,
+        .{ .root = cache.temporary_path, .dotfiles = false },
+    ));
 }

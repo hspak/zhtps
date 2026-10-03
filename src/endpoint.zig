@@ -533,8 +533,9 @@ pub fn Route(comptime Api: type) type {
         lane: Lane = std.enums.values(Lane)[0],
         /// Directory mounts match their prefix and every descendant path.
         subtree: bool = false,
-        /// Boot-time preparation for an opted-in static mount.
+        /// Filesystem roots checked against the private compression cache.
         static_mount: ?static_files.Cache.Mount = null,
+        static_zstd: bool = false,
 
         fn matches(route: Self, path: []const u8) bool {
             if (!route.subtree) return routing.matches(path, route.path);
@@ -673,7 +674,8 @@ pub fn staticFiles(
         .path = prefix,
         .handler = handler.respond,
         .subtree = true,
-        .static_mount = if (zstd) .{ .root = options.root, .dotfiles = serving.dotfiles } else null,
+        .static_mount = .{ .root = options.root, .dotfiles = serving.dotfiles },
+        .static_zstd = zstd,
         .before = if (@hasField(@TypeOf(options), "before")) options.before else &.{},
         .lane = if (@hasField(@TypeOf(options), "lane"))
             options.lane
@@ -747,7 +749,7 @@ pub fn Application(comptime Api: type) type {
         pub const Services = if (@hasDecl(Api, "Services")) Api.Services else void;
         pub const RuntimeInit = if (Services == void) void else *Services;
         pub const has_static_cache = has_cache: {
-            for (routes) |route| if (route.static_mount != null) break :has_cache true;
+            for (routes) |route| if (route.static_zstd) break :has_cache true;
             break :has_cache false;
         };
         pub const Prepared = if (has_static_cache) *static_files.Cache else void;
@@ -763,7 +765,11 @@ pub fn Application(comptime Api: type) type {
             errdefer gpa.destroy(cache);
             cache.* = try .init(gpa, io);
             errdefer cache.deinit(gpa, io);
-            for (routes) |route| if (route.static_mount) |mount| try cache.prepare(gpa, io, mount);
+            for (routes) |route| if (route.static_mount) |mount|
+                try cache.validateRoot(io, mount.root);
+            for (routes) |route| if (route.static_mount) |mount| {
+                if (route.static_zstd) try cache.prepare(gpa, io, mount);
+            };
             return cache;
         }
 
@@ -1900,6 +1906,23 @@ test "static files close retained descriptors after HEAD and canceled production
             platform.linux.fcntl(fd, platform.linux.F.GETFD, 0),
         ));
     }
+}
+
+test "static cache rejects uncompressed mounts that expose its files" {
+    const api = struct {
+        pub const routes = .{
+            staticFiles(@This(), "/assets", .{ .root = "licenses", .zstd = true }),
+            staticFiles(@This(), "/all", .{ .root = "/" }),
+        };
+    };
+    const prepare = struct {
+        fn run() !void {
+            const App = Application(api);
+            const prepared = try App.prepare(std.testing.allocator, std.testing.io);
+            defer App.unprepare(std.testing.allocator, std.testing.io, prepared);
+        }
+    }.run;
+    try std.testing.expectError(error.CacheInsideDocumentRoot, prepare());
 }
 
 test "static files detect truncation between response headers and production" {
